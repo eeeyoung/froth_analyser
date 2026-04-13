@@ -93,7 +93,12 @@ class ROIOverlayWidget(QWidget):
             self.update()
 
     def map_screen_to_image(self, rect):
-        """Math to translate screen UI pixels dynamically back into OpenCV (X,Y) logic."""
+        """
+        Direction: Screen UI -> Raw OpenCV Data
+        Purpose: When the user draws a box with their mouse on the screen, this 
+                 translates those screen coordinates back into the exact pixel 
+                 coordinates of the original, unscaled video frame.
+        """
         pixmap = self.player_widget.pixmap()
         if not pixmap or pixmap.isNull():
             return None
@@ -116,7 +121,12 @@ class ROIOverlayWidget(QWidget):
         return (img_x, img_y, img_w, img_h)
 
     def map_image_to_screen(self, img_x, img_y, img_w, img_h):
-        """Translates exact OpenCV backend ROIs forward onto the UI wrapper."""
+        """
+        Direction: Raw OpenCV Data -> Screen UI
+        Purpose: Takes backend coordinates (the true 1:1 image array values) 
+                 and scales them to figure out exactly where to paint the green 
+                 ROI boxes on the canvas, even if the user resizes the application window.
+        """
         pixmap = self.player_widget.pixmap()
         if not pixmap or pixmap.isNull():
             return None
