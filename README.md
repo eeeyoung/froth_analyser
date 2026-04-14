@@ -3,6 +3,7 @@ A modular Python-based application for real-time monitoring and metallurgical an
 
 
 ## Project Structure
+```
 froth-analysis-app/
 ├── pyproject.toml          # Project metadata and dependencies
 ├── poetry.lock             # Pin-point version control (don't touch manually!)
@@ -18,3 +19,4 @@ froth-analysis-app/
 │       └── database/       
 ├── tests/                  # For future unit tests
 └── assets/
+```
