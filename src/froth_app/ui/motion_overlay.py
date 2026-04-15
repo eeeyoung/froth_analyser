@@ -34,10 +34,6 @@ class MotionCrosshairOverlay(QWidget):
         _cy = 0.0 / 1.0  →  top / bottom edge (wraps)
     """
 
-    # Fraction retained per frame — pulls the crosshair back to centre over
-    # time so it never permanently drifts far from the video content.
-    _DECAY = 0.88
-
     # Screen multiplier: how many overlay pixels shift per flow pixel.
     _SCALE = 5.0
 
@@ -122,10 +118,6 @@ class MotionCrosshairOverlay(QWidget):
         """
         self._cx = (self._cx + frac_dx) % 1.0
         self._cy = (self._cy + frac_dy) % 1.0
-
-        # Decay toward centre
-        self._cx = self._cx * self._DECAY + 0.5 * (1.0 - self._DECAY)
-        self._cy = self._cy * self._DECAY + 0.5 * (1.0 - self._DECAY)
 
         self.update()
 

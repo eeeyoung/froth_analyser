@@ -137,6 +137,7 @@ class ROIDetailWindow(QWidget):
         """
         if self._crop_w == 0 or self._crop_h == 0:
             return
+        print(f'dx: {dx}, dy: {dy}, crop_w: {self._crop_w}, crop_h: {self._crop_h}')
         self._crosshair.push_fraction(dx / self._crop_w, dy / self._crop_h)
 
     def set_lk_visible(self, visible: bool) -> None:

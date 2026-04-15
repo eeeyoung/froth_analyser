@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QMessageBox, QApplication, QFileDialog,
     QGridLayout, QSizePolicy, QDialog, QDialogButtonBox
 )
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Slot, Qt
 import pyqtgraph as pg
 
 # Allow imports if run directly from root
