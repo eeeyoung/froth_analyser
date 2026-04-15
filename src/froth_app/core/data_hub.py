@@ -11,8 +11,10 @@ per ROI, and prints a combined ROI report every time any algorithm updates.
 
 Adding support for a new algorithm
 ------------------------------------
-1. Add a handler method _format_<algo_name>() that returns a one-line string.
-2. Register it in _FORMATTERS at the bottom of the class.
+1. Add a _process_<algo>() method that returns a clean dict of meaningful fields.
+2. Add a _format_<algo>() method that accepts that clean dict and returns a log str.
+3. Register both in _PROCESSORS and _FORMATTERS at the bottom of the class.
+4. Optionally add a Qt Signal and emit it inside _ingest().
 """
 
 import math
@@ -27,21 +29,27 @@ class GlobalDataHub(QThread):
     Background thread that collects analysis results from all ROIWorker
     processes, groups them by ROI, and prints a combined report each time
     any algorithm for a given ROI produces a new result.
+
+    Signals emit *processed* dicts — only the meaningful, UI-ready fields —
+    rather than the raw worker payload.
     """
 
-    # Emitted on the main thread whenever an LBP result arrives.
-    # Args: (roi_id: int, result: dict) — connect to UI plot widgets.
+    # Emitted after LK result is processed. Payload is a clean dict:
+    # { "dx_pixels", "dy_pixels", "real_distance", "unit", "features_tracked" }
+    lk_data_ready = Signal(int, object)
+
+    # Emitted after LBP result is processed. Payload is a clean dict:
+    # { "texture_change_score", "hist_r", "hist_g", "hist_b", "features_tracked" }
     lbp_data_ready = Signal(int, object)
 
     def __init__(self, calibration_manager: CalibrationManager, parent=None):
         super().__init__(parent)
-        # IPC Queue that multiple Worker Processes will write to
         self.collection_queue = Queue()
         self.calibration = calibration_manager
         self._is_running = False
 
-        # Latest result per ROI per algorithm:
-        # { roi_id: { algo_name: result_dict } }
+        # Latest *processed* result per ROI per algorithm:
+        # { roi_id: { algo_name: processed_dict } }
         self._roi_buffer: dict[int, dict[str, dict]] = {}
 
     def run(self):
@@ -57,22 +65,31 @@ class GlobalDataHub(QThread):
 
     def _ingest(self, raw_data: dict):
         """
-        Store the incoming result in the per-ROI buffer under its algorithm
-        name, then reprint the full combined report for that ROI.
+        1. Extract the algorithm name and ROI id.
+        2. Call the appropriate _process_* method to get a clean dict.
+        3. Store the clean dict in the buffer.
+        4. Emit the relevant Qt Signal with the clean dict.
+        5. Reprint the combined log block for that ROI.
         """
         roi_id = raw_data.get("roi_id", 0)
         algo   = raw_data.get("algorithm", "Unknown")
-        print(f"[Data Hub] Ingesting {algo} for ROI {roi_id + 1}")
-        # Update the buffer slot for this (roi_id, algorithm) pair
+
+        # --- Process raw → clean ---
+        processor = self._PROCESSORS.get(algo, self._process_unknown)
+        processed = processor(self, raw_data)
+
+        # --- Store clean result ---
         if roi_id not in self._roi_buffer:
             self._roi_buffer[roi_id] = {}
-        self._roi_buffer[roi_id][algo] = raw_data
+        self._roi_buffer[roi_id][algo] = processed
 
-        # Signal the UI for live chart updates (crosses thread safely via Qt queue)
-        if algo == "LBPAlgorithm":
-            self.lbp_data_ready.emit(roi_id, raw_data)
+        # --- Emit signal with clean dict (thread-safe via Qt queue) ---
+        if algo == "LucasKanadeAlgorithm":
+            self.lk_data_ready.emit(roi_id, processed)
+        elif algo == "LBPAlgorithm":
+            self.lbp_data_ready.emit(roi_id, processed)
 
-        # Reprint the full combined block for this ROI
+        # --- Log ---
         self._print_roi(roi_id)
 
     def _print_roi(self, roi_id: int):
@@ -82,55 +99,75 @@ class GlobalDataHub(QThread):
             return
 
         lines = [f"[Data Hub] ROI {roi_id + 1}"]
-        for algo_name, result in algo_results.items():
+        for algo_name, processed in algo_results.items():
             formatter = self._FORMATTERS.get(algo_name, self._format_unknown)
-            lines.append(f"  [{algo_name}] {formatter(self, result)}")
+            lines.append(f"  [{algo_name}] {formatter(self, processed)}")
 
         print("\n".join(lines))
 
     # ------------------------------------------------------------------
-    # Per-algorithm line formatters
-    # Each returns a single descriptive string for its result dict.
+    # Processors — raw worker dict → clean UI-ready dict
+    # These are the single source of truth for what each signal carries.
     # ------------------------------------------------------------------
 
-    def _format_lucas_kanade(self, result: dict) -> str:
-        dx_p    = result.get("dx_pixels", 0.0)
-        dy_p    = result.get("dy_pixels", 0.0)
-        tracked = result.get("features_tracked", 0)
+    def _process_lucas_kanade(self, raw: dict) -> dict:
+        dx_p    = raw.get("dx_pixels", 0.0)
+        dy_p    = raw.get("dy_pixels", 0.0)
+        tracked = raw.get("features_tracked", 0)
 
         pixel_magnitude = math.sqrt(dx_p ** 2 + dy_p ** 2)
         real_distance   = self.calibration.get_real_distance(pixel_magnitude)
-        unit            = self.calibration.unit_name
 
-        return (
-            f"Vector(x:{dx_p:.2f}, y:{dy_p:.2f}) px -> "
-            f"Moved: {real_distance:.4f} {unit}/frame | "
-            f"Tracked {tracked} elements"
-        )
+        return {
+            "dx_pixels":       dx_p,
+            "dy_pixels":       dy_p,
+            "pixel_magnitude": pixel_magnitude,
+            "real_distance":   real_distance,
+            "unit":            self.calibration.unit_name,
+            "features_tracked": tracked,
+        }
 
-    def _format_lbp(self, result: dict) -> str:
-        score   = result.get("texture_change_score", 0.0)
-        tracked = result.get("features_tracked", 0)
-        hist_r  = result.get("lbp_r_hist")
-        hist_g  = result.get("lbp_g_hist")
-        hist_b  = result.get("lbp_b_hist")
+    def _process_lbp(self, raw: dict) -> dict:
+        return {
+            "texture_change_score": raw.get("texture_change_score", 0.0),
+            "hist_r":               raw.get("lbp_r_hist"),
+            "hist_g":               raw.get("lbp_g_hist"),
+            "hist_b":               raw.get("lbp_b_hist"),
+            "features_tracked":     raw.get("features_tracked", 0),
+        }
 
-        peak_r = int(hist_r.argmax()) if hist_r is not None else -1
-        peak_g = int(hist_g.argmax()) if hist_g is not None else -1
-        peak_b = int(hist_b.argmax()) if hist_b is not None else -1
-
-        return (
-            f"Texture change: {score:.4f} | "
-            f"Peak codes R:{peak_r} G:{peak_g} B:{peak_b} | "
-            f"Pixels: {tracked}"
-        )
-
-    def _format_unknown(self, result: dict) -> str:
-        return repr(result)
+    def _process_unknown(self, raw: dict) -> dict:
+        return dict(raw)  # pass-through, stripping nothing
 
     # ------------------------------------------------------------------
-    # Formatter registry — maps algorithm class name -> formatter method
+    # Formatters — clean dict → one-line log string
+    # These consume the *processed* dict, not the raw worker payload.
     # ------------------------------------------------------------------
+
+    def _format_lucas_kanade(self, processed: dict) -> str:
+        return (
+            f"Vector(x:{processed['dx_pixels']:.2f}, y:{processed['dy_pixels']:.2f}) px -> "
+            f"Moved: {processed['real_distance']:.4f} {processed['unit']}/frame | "
+            f"Tracked {processed['features_tracked']} elements"
+        )
+
+    def _format_lbp(self, processed: dict) -> str:
+        return (
+            f"Texture change: {processed['texture_change_score']:.4f} | "
+            f"Pixels: {processed['features_tracked']}"
+        )
+
+    def _format_unknown(self, processed: dict) -> str:
+        return repr(processed)
+
+    # ------------------------------------------------------------------
+    # Registries — map algorithm class name → method
+    # ------------------------------------------------------------------
+    _PROCESSORS: dict = {
+        "LucasKanadeAlgorithm": _process_lucas_kanade,
+        "LBPAlgorithm":         _process_lbp,
+    }
+
     _FORMATTERS: dict = {
         "LucasKanadeAlgorithm": _format_lucas_kanade,
         "LBPAlgorithm":         _format_lbp,

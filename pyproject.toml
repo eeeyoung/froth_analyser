@@ -11,7 +11,8 @@ dependencies = [
     "pyside6 (>=6.11.0,<7.0.0)",
     "opencv-python (>=4.13.0.92,<5.0.0.0)",
     "numpy (>=2.4.4,<3.0.0)",
-    "pyqtgraph (>=0.14.0,<0.15.0)"
+    "pyqtgraph (>=0.14.0,<0.15.0)",
+    "scikit-image (>=0.26.0,<0.27.0)"
 ]
 
 

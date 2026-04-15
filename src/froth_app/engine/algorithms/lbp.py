@@ -34,15 +34,15 @@ Visualisation notes
 
 import cv2
 import numpy as np
+from skimage.feature import local_binary_pattern
 from froth_app.engine.algorithms.base import BaseAnalysisAlgorithm
 
 
 def _compute_lbp(gray: np.ndarray, P: int = 8, R: int = 1) -> np.ndarray:
     """
-    Compute a circular LBP map for a single-channel (grayscale) image.
+    Compute a circular Uniform LBP map for a single-channel (grayscale) image.
 
-    Uses bilinear interpolation for non-integer neighbour coordinates and
-    produces codes in the range [0, 2^P − 1].
+    Produces codes in the range [0, P*(P-1) + 2]. For P=8, this is [0, 58].
 
     Parameters
     ----------
@@ -55,36 +55,14 @@ def _compute_lbp(gray: np.ndarray, P: int = 8, R: int = 1) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray (H, W), uint8
-        LBP-encoded image.
+    np.ndarray (H, W), float
+        LBP-encoded image (Uniform mapping).
     """
-    H, W = gray.shape
-    lbp = np.zeros((H, W), dtype=np.uint8)
-    gray_f = gray.astype(np.float32)
-
-    # Base coordinate grids — shape (H, W) float32, required by cv2.remap
-    col_coords = np.arange(W, dtype=np.float32)   # (W,)
-    row_coords = np.arange(H, dtype=np.float32)   # (H,)
-    base_x, base_y = np.meshgrid(col_coords, row_coords)  # both (H, W)
-
-    for p in range(P):
-        angle = 2 * np.pi * p / P
-        map_x = (base_x + R * np.cos(angle)).astype(np.float32)
-        map_y = (base_y - R * np.sin(angle)).astype(np.float32)
-
-        neighbour = cv2.remap(
-            gray_f, map_x, map_y,
-            interpolation=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_REFLECT_101,
-        )
-
-        # Threshold: neighbour >= centre → bit p = 1
-        lbp |= ((neighbour >= gray_f).astype(np.uint8) << p)
-
+    lbp = local_binary_pattern(gray, P, R, method='uniform')
     return lbp
 
 
-def _histogram(lbp_map: np.ndarray, bins: int = 256) -> np.ndarray:
+def _histogram(lbp_map: np.ndarray, bins: int = 59) -> np.ndarray:
     """Return a normalised histogram of LBP codes."""
     hist, _ = np.histogram(lbp_map.ravel(), bins=bins, range=(0, bins))
     total = hist.sum()
@@ -107,7 +85,7 @@ class LBPAlgorithm(BaseAnalysisAlgorithm):
     flow alone cannot capture.
     """
 
-    def __init__(self, P: int = 8, R: int = 1):
+    def __init__(self, P: int = 8, R: int = 3):
         """
         Parameters
         ----------

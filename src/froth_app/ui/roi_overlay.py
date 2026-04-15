@@ -176,13 +176,22 @@ class ROIOverlayWidget(QWidget):
 
 class CroppedROIWidget(QLabel):
     """Auxiliary UI module that receives an OpenCV array and displays just a small crop."""
+
+    clicked = Signal()   # emitted when the user clicks the thumbnail
+
     def __init__(self, title=""):
         super().__init__()
         self.setFixedSize(220, 220)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("background-color: #1a1a1a; border: 1px solid #555; color: white;")
+        self.setStyleSheet("background-color: #1a1a1a; border: 1px solid #555; color: white;"
+                           "cursor: pointer;")
         self.setText(title)
-        
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
     def update_crop(self, frame: np.ndarray, roi_rect_tuple):
         """Isolates the sub-pixel array for the Analysis Engine."""
         if frame is None or not roi_rect_tuple:
