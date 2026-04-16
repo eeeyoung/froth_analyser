@@ -1,3 +1,4 @@
+import sys
 import cv2
 import numpy as np
 from PySide6.QtCore import QThread, Signal, Slot, Qt, QMutex, QMutexLocker
@@ -32,7 +33,11 @@ class VideoSource(QThread):
         """
         available_cameras = []
         for i in range(max_tests):
-            cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+            if sys.platform == "win32":
+                cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+            else:
+                cap = cv2.VideoCapture(i)
+                
             if cap.isOpened():
                 ret, _ = cap.read()
                 if ret:
@@ -52,7 +57,10 @@ class VideoSource(QThread):
             # Integers are usually local cameras; strings are files/streams
             if isinstance(source, int):
                 # DSHOW prevents long timeouts if a camera is stuck
-                self.capture = cv2.VideoCapture(source, cv2.CAP_DSHOW)
+                if sys.platform == "win32":
+                    self.capture = cv2.VideoCapture(source, cv2.CAP_DSHOW)
+                else:
+                    self.capture = cv2.VideoCapture(source)
                 self.is_file = False
             else:
                 self.capture = cv2.VideoCapture(source)
