@@ -87,19 +87,19 @@ class FunctionsDialog(QDialog):
 # LBP Time-Series Plot Widget
 # ---------------------------------------------------------------------------
 class LBPPlotWidget(pg.PlotWidget):
-    """Live scrolling texture-change score chart for one ROI."""
+    """Live scrolling PCA chart for one ROI."""
 
     HISTORY = 120
 
     def __init__(self, roi_index: int, parent=None):
         super().__init__(parent)
 
+        self.roi_index = roi_index
         self.setBackground("#0d1117")
-        self.setTitle(f"ROI {roi_index + 1}  —  LBP Texture Metrics",
+        self.setTitle(f"ROI {roi_index + 1}  —  LBP PCA",
                       color="#c9d1d9", size="8pt")
         self.showGrid(x=True, y=True, alpha=0.15)
-        self.setYRange(0, 1.05, padding=0)
-        self.setLabel("left", "Value (norm.)", color="#8b949e", size="8pt")
+        self.setLabel("left", "PCA Projection", color="#8b949e", size="8pt")
         self.getAxis("bottom").setStyle(showValues=False)
         self.getAxis("left").setWidth(38)
         self.setMinimumHeight(130)
@@ -107,26 +107,52 @@ class LBPPlotWidget(pg.PlotWidget):
 
         self._x = list(range(self.HISTORY))
         _zero = [0.0] * self.HISTORY
-        self._score = deque(_zero, maxlen=self.HISTORY)
+        self._pc1 = deque(_zero, maxlen=self.HISTORY)
+        self._pc2 = deque(_zero, maxlen=self.HISTORY)
 
         legend = self.addLegend(offset=(-5, 5), labelTextColor="#c9d1d9", colCount=2)
         legend.setParentItem(self.graphicsItem())
 
-        self._curve_score = self.plot(
-            self._x, list(self._score),
-            pen=pg.mkPen("#ffffff", width=2.5),
-            name="Texture Δ",
+        self._curve_pc1 = self.plot(
+            self._x, list(self._pc1),
+            pen=pg.mkPen("#ff79c6", width=2.0),
+            name="PC 1",
+        )
+        self._curve_pc2 = self.plot(
+            self._x, list(self._pc2),
+            pen=pg.mkPen("#8be9fd", width=2.0),
+            name="PC 2",
         )
 
-    @Slot(float)
-    def push(self, score: float):
-        self._score.append(min(float(score), 1.0))
-        self._curve_score.setData(self._x, list(self._score))
+    @Slot(object)
+    def push(self, data: dict):
+        if data.get("is_baseline", True):
+            elapsed = data.get("elapsed", 0.0)
+            self.setTitle(f"ROI {self.roi_index + 1}  —  Baseline: {elapsed:.1f}s", color="#f1fa8c")
+            return
+            
+        pc1 = data.get("pc1", 0.0)
+        pc2 = data.get("pc2", 0.0)
+        t_sq = data.get("t_squared", 0.0)
+        is_anomaly = data.get("is_anomaly", False)
+
+        self._pc1.append(pc1)
+        self._pc2.append(pc2)
+
+        self._curve_pc1.setData(self._x, list(self._pc1))
+        self._curve_pc2.setData(self._x, list(self._pc2))
+        
+        status_color = "#ff5555" if is_anomaly else "#50fa7b"
+        status_text = "ANOMALY!" if is_anomaly else "Normal"
+        self.setTitle(f"ROI {self.roi_index + 1}  —  T²: {t_sq:.1f} ({status_text})", color=status_color)
 
     def clear_data(self):
         zero = [0.0] * self.HISTORY
-        self._score = deque(zero, maxlen=self.HISTORY)
-        self._curve_score.setData(self._x, zero)
+        self._pc1 = deque(zero, maxlen=self.HISTORY)
+        self._pc2 = deque(zero, maxlen=self.HISTORY)
+        self._curve_pc1.setData(self._x, zero)
+        self._curve_pc2.setData(self._x, zero)
+        self.setTitle(f"ROI {self.roi_index + 1}  —  LBP PCA", color="#c9d1d9")
 
 
 # ---------------------------------------------------------------------------
@@ -371,8 +397,7 @@ class FullStackTestWindow(QWidget):
     def on_lbp_data(self, roi_id: int, processed: dict):
         if roi_id >= len(self.lbp_plot_widgets):
             return
-        score = processed.get("texture_change_score", 0.0)
-        self.lbp_plot_widgets[roi_id].push(score)
+        self.lbp_plot_widgets[roi_id].push(processed)
 
     @Slot(int, object)
     def on_lk_data(self, roi_id: int, processed: dict):

@@ -18,10 +18,13 @@ Adding support for a new algorithm
 """
 
 import math
+import time
+import numpy as np
 from PySide6.QtCore import QThread, Signal
 from queue import Empty
 from multiprocessing import Queue
 from froth_app.core.calibration import CalibrationManager
+from froth_app.engine.algorithms.pca_handler import LBPPCAHandler
 
 
 class GlobalDataHub(QThread):
@@ -51,6 +54,10 @@ class GlobalDataHub(QThread):
         # Latest *processed* result per ROI per algorithm:
         # { roi_id: { algo_name: processed_dict } }
         self._roi_buffer: dict[int, dict[str, dict]] = {}
+        
+        # LBP PCA State Handlers per ROI:
+        # { roi_id: LBPPCAHandler }
+        self._lbp_handlers: dict[int, LBPPCAHandler] = {}
 
     def run(self):
         self._is_running = True
@@ -103,7 +110,7 @@ class GlobalDataHub(QThread):
             formatter = self._FORMATTERS.get(algo_name, self._format_unknown)
             lines.append(f"  [{algo_name}] {formatter(self, processed)}")
 
-        print("\n".join(lines))
+        # print("\n".join(lines))
 
     # ------------------------------------------------------------------
     # Processors — raw worker dict → clean UI-ready dict
@@ -128,13 +135,36 @@ class GlobalDataHub(QThread):
         }
 
     def _process_lbp(self, raw: dict) -> dict:
-        return {
-            "texture_change_score": raw.get("texture_change_score", 0.0),
-            "hist_r":               raw.get("lbp_r_hist"),
-            "hist_g":               raw.get("lbp_g_hist"),
-            "hist_b":               raw.get("lbp_b_hist"),
-            "features_tracked":     raw.get("features_tracked", 0),
+        roi_id = raw.get("roi_id", 0)
+        hr = raw.get("lbp_r_hist")
+        hg = raw.get("lbp_g_hist")
+        hb = raw.get("lbp_b_hist")
+        score = raw.get("texture_change_score", 0.0)
+        tracked = raw.get("features_tracked", 0)
+
+        # Base clean dict
+        result = {
+            "texture_change_score": score,
+            "features_tracked": tracked,
+            "is_baseline": True,
+            "pc1": None,
+            "pc2": None,
+            "elapsed": 0.0
         }
+
+        if hr is None or hg is None or hb is None:
+            return result
+
+        combined_hist = np.concatenate([hr, hg, hb])
+
+        if roi_id not in self._lbp_handlers:
+            self._lbp_handlers[roi_id] = LBPPCAHandler(baseline_duration=1.5)
+
+        # Delegate PCA logic to handler
+        pca_result = self._lbp_handlers[roi_id].process_frame(combined_hist, roi_id)
+        result.update(pca_result)
+
+        return result
 
     def _process_unknown(self, raw: dict) -> dict:
         return dict(raw)  # pass-through, stripping nothing
@@ -152,10 +182,23 @@ class GlobalDataHub(QThread):
         )
 
     def _format_lbp(self, processed: dict) -> str:
-        return (
-            f"Texture change: {processed['texture_change_score']:.4f} | "
-            f"Pixels: {processed['features_tracked']}"
+        base_str = (
+            f"Texture change: {processed.get('texture_change_score', 0.0):.4f} | "
+            f"Pixels: {processed.get('features_tracked', 0)}"
         )
+        
+        if processed.get("is_baseline", True):
+            elapsed = processed.get("elapsed", 0.0)
+            return f"{base_str} | [Baseline phase: {elapsed:.2f}s / 1.5s]"
+        else:
+            pc1 = processed.get("pc1", 0.0)
+            pc2 = processed.get("pc2", 0.0)
+            return f"{base_str} | PC1: {pc1:.4f}, PC2: {pc2:.4f}"
+
+    def reset_roi_lbp_state(self, roi_id: int):
+        """Clear the LBP baseline state for an ROI so it starts over."""
+        if roi_id in self._lbp_handlers:
+            del self._lbp_handlers[roi_id]
 
     def _format_unknown(self, processed: dict) -> str:
         return repr(processed)

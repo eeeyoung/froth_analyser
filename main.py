@@ -13,3 +13,9 @@ if __name__ == "__main__":
     import os
     sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
     main()
+
+# Confidence interval
+# PC 1&2
+# PCA model - feed the data of the first few seconds, the project later data on it
+# Air Flow configuration, reagent flows
+# Boiling froth - predict in advance
