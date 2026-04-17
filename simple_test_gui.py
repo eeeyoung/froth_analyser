@@ -19,6 +19,7 @@ from src.froth_app.core.video_source import VideoSource, VideoPlayerWidget
 from src.froth_app.core.roi_manager import ROICoordinateManager
 from src.froth_app.ui.roi_overlay import ROIOverlayWidget, CroppedROIWidget
 from src.froth_app.ui.roi_detail_window import ROIDetailWindow
+from src.froth_app.ui.log_book_interface import LogBookInterface
 from src.froth_app.core.calibration import CalibrationManager
 from src.froth_app.core.data_hub import GlobalDataHub
 from src.froth_app.core.algorithm_state import AlgorithmStateManager
@@ -201,6 +202,9 @@ class FullStackTestWindow(QWidget):
         self.algo_state   = AlgorithmStateManager()
         self.data_hub     = GlobalDataHub(self.calibration)
         self.analyzer     = AnalysisEngineMaster(self.data_hub)
+        
+        self.log_book_widget = LogBookInterface()
+        self.data_hub.log_book.log_ready.connect(self.log_book_widget.push_log)
 
         self.video_source = VideoSource()
         self.roi_manager  = ROICoordinateManager(max_rois=3)
@@ -239,11 +243,15 @@ class FullStackTestWindow(QWidget):
 
         self.btn_functions = QPushButton("4. Functions")
         self.btn_functions.setStyleSheet("background-color: #555555; color: white;")
+        
+        self.btn_logbook = QPushButton("5. Log Book")
+        self.btn_logbook.setStyleSheet("background-color: #2F4F4F; color: white;")
 
         btn_layout.addWidget(self.btn_load_cam)
         btn_layout.addWidget(self.btn_load_video)
         btn_layout.addWidget(self.btn_play_pause)
         btn_layout.addWidget(self.btn_functions)
+        btn_layout.addWidget(self.btn_logbook)
         left_panel.addLayout(btn_layout)
 
         # --- ROI Architecture Buttons ---
@@ -322,6 +330,7 @@ class FullStackTestWindow(QWidget):
         self.btn_load_video.clicked.connect(self.load_video)
         self.btn_play_pause.clicked.connect(self.toggle_play_pause)
         self.btn_functions.clicked.connect(self.open_functions_dialog)
+        self.btn_logbook.clicked.connect(self.open_log_book)
 
         self.btn_add_roi.clicked.connect(
             lambda: self.overlay_widget.enable_drawing(True)
@@ -358,6 +367,13 @@ class FullStackTestWindow(QWidget):
         for detail in self._detail_windows:
             if detail is not None:
                 detail.set_lk_visible(lk_active)
+
+    @Slot()
+    def open_log_book(self):
+        """Open the realtime visual log book dashboard."""
+        self.log_book_widget.show()
+        self.log_book_widget.raise_()
+        self.log_book_widget.activateWindow()
 
     @Slot(bool)
     def _toggle_live_data_panel(self, visible: bool):

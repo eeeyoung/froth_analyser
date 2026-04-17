@@ -25,6 +25,7 @@ from queue import Empty
 from multiprocessing import Queue
 from froth_app.core.calibration import CalibrationManager
 from froth_app.engine.algorithms.pca_handler import LBPPCAHandler
+from froth_app.core.log_book import LogBook, LogLevel
 
 
 class GlobalDataHub(QThread):
@@ -51,6 +52,7 @@ class GlobalDataHub(QThread):
         self.calibration = calibration_manager
         self._is_running = False
         self.baseline_duration = 1.5
+        self.log_book = LogBook()
 
         # Latest *processed* result per ROI per algorithm:
         # { roi_id: { algo_name: processed_dict } }
@@ -97,7 +99,13 @@ class GlobalDataHub(QThread):
         elif algo == "LBPAlgorithm":
             self.lbp_data_ready.emit(roi_id, processed)
 
-        # --- Log ---
+        # --- Assess Priority Level & Record out to File ---
+        level = LogLevel.INFO
+        if processed.get("is_anomaly", False):
+            level = LogLevel.IMPORTANT
+        self.log_book.record(level, roi_id, algo, processed)
+
+        # --- Log to Console ---
         self._print_roi(roi_id)
 
     def _print_roi(self, roi_id: int):
