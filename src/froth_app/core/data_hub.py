@@ -50,6 +50,7 @@ class GlobalDataHub(QThread):
         self.collection_queue = Queue()
         self.calibration = calibration_manager
         self._is_running = False
+        self.baseline_duration = 1.5
 
         # Latest *processed* result per ROI per algorithm:
         # { roi_id: { algo_name: processed_dict } }
@@ -158,7 +159,7 @@ class GlobalDataHub(QThread):
         combined_hist = np.concatenate([hr, hg, hb])
 
         if roi_id not in self._lbp_handlers:
-            self._lbp_handlers[roi_id] = LBPPCAHandler(baseline_duration=1.5)
+            self._lbp_handlers[roi_id] = LBPPCAHandler(baseline_duration=self.baseline_duration)
 
         # Delegate PCA logic to handler
         pca_result = self._lbp_handlers[roi_id].process_frame(combined_hist, roi_id)
@@ -189,7 +190,7 @@ class GlobalDataHub(QThread):
         
         if processed.get("is_baseline", True):
             elapsed = processed.get("elapsed", 0.0)
-            return f"{base_str} | [Baseline phase: {elapsed:.2f}s / 1.5s]"
+            return f"{base_str} | [Baseline phase: {elapsed:.2f}s / {self.baseline_duration:.1f}s]"
         else:
             pc1 = processed.get("pc1", 0.0)
             pc2 = processed.get("pc2", 0.0)
@@ -202,6 +203,11 @@ class GlobalDataHub(QThread):
 
     def _format_unknown(self, processed: dict) -> str:
         return repr(processed)
+
+    def update_baseline_duration(self, duration: float):
+        self.baseline_duration = duration
+        for handler in self._lbp_handlers.values():
+            handler.baseline_duration = duration
 
     # ------------------------------------------------------------------
     # Registries — map algorithm class name → method

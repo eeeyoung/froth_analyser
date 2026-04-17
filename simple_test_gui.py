@@ -6,7 +6,8 @@ from multiprocessing import freeze_support
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QCheckBox, QMessageBox, QApplication, QFileDialog,
-    QGridLayout, QSizePolicy, QDialog, QDialogButtonBox
+    QGridLayout, QSizePolicy, QDialog, QDialogButtonBox,
+    QDoubleSpinBox
 )
 from PySide6.QtCore import Slot, Qt
 import pyqtgraph as pg
@@ -38,12 +39,13 @@ class FunctionsDialog(QDialog):
     back to it when the user confirms.
     """
 
-    def __init__(self, algo_state: AlgorithmStateManager, parent=None):
+    def __init__(self, algo_state: AlgorithmStateManager, data_hub: GlobalDataHub, parent=None):
         super().__init__(parent)
         self._algo_state = algo_state
+        self._data_hub = data_hub
 
         self.setWindowTitle("Analysis Functions")
-        self.setFixedSize(320, 180)
+        self.setFixedSize(320, 220)
         self.setStyleSheet("background-color: #1e1e1e; color: #e0e0e0;")
 
         layout = QVBoxLayout(self)
@@ -54,6 +56,25 @@ class FunctionsDialog(QDialog):
         title.setStyleSheet("font-size: 11px; color: #aaaaaa;")
         layout.addWidget(title)
 
+        # Build spinbox for LBP Baseline config
+        self._lbp_duration_spinbox = QDoubleSpinBox()
+        self._lbp_duration_spinbox.setRange(0.5, 100.0)
+        self._lbp_duration_spinbox.setSingleStep(0.5)
+        self._lbp_duration_spinbox.setValue(self._data_hub.baseline_duration)
+        self._lbp_duration_spinbox.setSuffix(" s")
+        self._lbp_duration_spinbox.setStyleSheet(
+            "QDoubleSpinBox { font-size: 12px; background-color: #2c2c2c; "
+            "color: white; border: 1px solid #444; border-radius: 3px; padding: 2px; }"
+        )
+        self._lbp_duration_container = QWidget()
+        dur_layout = QHBoxLayout(self._lbp_duration_container)
+        dur_layout.setContentsMargins(24, 0, 0, 0)
+        lbl = QLabel("↳ Baseline duration:")
+        lbl.setStyleSheet("font-size: 11px; color: #888888;")
+        dur_layout.addWidget(lbl)
+        dur_layout.addWidget(self._lbp_duration_spinbox)
+        dur_layout.addStretch()
+
         # Build one checkbox per algorithm, pre-populated from state
         self._checkboxes: dict[int, QCheckBox] = {}
         for algo_id, label in AlgorithmStateManager.ALGORITHM_LABELS.items():
@@ -62,6 +83,11 @@ class FunctionsDialog(QDialog):
             chk.setStyleSheet("font-size: 12px;")
             layout.addWidget(chk)
             self._checkboxes[algo_id] = chk
+            
+            if algo_id == _ALGO_LBP:
+                layout.addWidget(self._lbp_duration_container)
+                self._lbp_duration_container.setVisible(chk.isChecked())
+                chk.toggled.connect(self._lbp_duration_container.setVisible)
 
         # Confirm button
         btn_box = QDialogButtonBox(QDialogButtonBox.Ok)
@@ -80,6 +106,10 @@ class FunctionsDialog(QDialog):
             for algo_id, chk in self._checkboxes.items()
         }
         self._algo_state.apply_snapshot(snapshot)
+        
+        # Sync the baseline duration value to the data hub seamlessly
+        self._data_hub.update_baseline_duration(self._lbp_duration_spinbox.value())
+        
         self.accept()
 
 
@@ -321,7 +351,7 @@ class FullStackTestWindow(QWidget):
     @Slot()
     def open_functions_dialog(self):
         """Open the Functions selection popup and apply changes on confirm."""
-        dlg = FunctionsDialog(algo_state=self.algo_state, parent=self)
+        dlg = FunctionsDialog(algo_state=self.algo_state, data_hub=self.data_hub, parent=self)
         dlg.exec()
         # Sync crosshair visibility in all open detail windows
         lk_active = self.algo_state.is_active(_ALGO_LK)
