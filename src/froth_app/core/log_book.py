@@ -75,7 +75,6 @@ class LogBook(QObject):
             }
         elif algorithm == "LucasKanadeAlgorithm":
             filtered_data = {
-                "real_distance": data_payload.get("real_distance"),
                 "velocity": data_payload.get("velocity"),
                 "velocity_ready": data_payload.get("velocity_ready")
             }

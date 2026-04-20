@@ -210,6 +210,55 @@ class LBPPlotWidget(pg.PlotWidget):
         self.roi_index = idx
         self.clear_data()
 
+# ---------------------------------------------------------------------------
+# Velocity Time-Series Plot Widget
+# ---------------------------------------------------------------------------
+class VelocityPlotWidget(pg.PlotWidget):
+    """Live scrolling Velocity chart for one ROI."""
+
+    HISTORY = 60 # Store 60 seconds of history at 1 tick/second
+
+    def __init__(self, roi_index: int, parent=None):
+        super().__init__(parent)
+
+        self.roi_index = roi_index
+        self.setBackground("#0d1117")
+        self.setTitle(f"ROI {roi_index + 1}  —  Velocity",
+                      color="#c9d1d9", size="8pt")
+        self.showGrid(x=True, y=True, alpha=0.15)
+        self.setLabel("left", "Velocity", color="#8b949e", size="8pt")
+        self.getAxis("bottom").setStyle(showValues=False)
+        self.getAxis("left").setWidth(38)
+        self.setMinimumHeight(130)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self._x = list(range(self.HISTORY))
+        _zero = [0.0] * self.HISTORY
+        self._velocity = deque(_zero, maxlen=self.HISTORY)
+
+        self._curve = self.plot(
+            self._x, list(self._velocity),
+            pen=pg.mkPen("#f1fa8c", width=2.0),
+            name="Velocity",
+            fillLevel=0, fillBrush=(241, 250, 140, 50)
+        )
+
+    @Slot(object)
+    def push(self, data: dict):
+        vel = data.get("velocity", 0.0)
+        unit = data.get("unit", "px")
+        
+        self._velocity.append(vel)
+        self._curve.setData(self._x, list(self._velocity))
+        
+        self.setTitle(f"ROI {self.roi_index + 1}  —  Velocity: {vel:.4f} {unit}/s", color="#f1fa8c")
+
+    def clear_data(self):
+        zero = [0.0] * self.HISTORY
+        self._velocity = deque(zero, maxlen=self.HISTORY)
+        self._curve.setData(self._x, zero)
+        self.setTitle(f"ROI {self.roi_index + 1}  —  Velocity", color="#c9d1d9")
+
 
 # ---------------------------------------------------------------------------
 # Main Window
@@ -309,10 +358,12 @@ class FullStackTestWindow(QWidget):
 
         self.crop_widgets     = []
         self.lbp_plot_widgets = []
+        self.lk_plot_widgets  = []
         self._detail_windows: list[ROIDetailWindow | None] = []
         
         thumbnails_layout = QHBoxLayout()
         self.plot_stack = QStackedWidget()
+        self.vel_plot_stack = QStackedWidget()
 
         for i in range(self.roi_manager.max_rois):
             # Thumbnail selector
@@ -332,6 +383,11 @@ class FullStackTestWindow(QWidget):
             plot = LBPPlotWidget(roi_index=i)
             self.lbp_plot_widgets.append(plot)
             self.plot_stack.addWidget(plot)
+            
+            # Independent Velocity chart for THIS ROI placed directly into the invisible stack
+            vplot = VelocityPlotWidget(roi_index=i)
+            self.lk_plot_widgets.append(vplot)
+            self.vel_plot_stack.addWidget(vplot)
 
             # Wire thumbnail clicks
             crop.clicked.connect(lambda checked=False, idx=i: self.select_roi(idx))
@@ -341,6 +397,7 @@ class FullStackTestWindow(QWidget):
 
         right_panel.addLayout(thumbnails_layout)
         right_panel.addWidget(self.plot_stack, stretch=1)
+        right_panel.addWidget(self.vel_plot_stack, stretch=1)
 
         self.select_roi(0)
 
@@ -409,12 +466,14 @@ class FullStackTestWindow(QWidget):
         for crop in self.crop_widgets:
             crop.setVisible(visible)
         self.plot_stack.setVisible(visible)
+        self.vel_plot_stack.setVisible(visible)
 
     def select_roi(self, idx: int):
         self._selected_roi = idx
         for i, crop in enumerate(self.crop_widgets):
             crop.set_selected(i == idx)
         self.plot_stack.setCurrentIndex(idx)
+        self.vel_plot_stack.setCurrentIndex(idx)
 
     def _open_detail(self, roi_id: int):
         """Show or raise the detail popup for the given ROI."""
@@ -443,6 +502,7 @@ class FullStackTestWindow(QWidget):
             last_roi_id = len(self.roi_manager.rois) - 1
             self.analyzer.remove_roi_stream(last_roi_id)
             self.lbp_plot_widgets[last_roi_id].clear_data()
+            self.lk_plot_widgets[last_roi_id].clear_data()
             self._last_crops[last_roi_id] = None
             detail = self._detail_windows[last_roi_id]
             if detail is not None:
@@ -485,6 +545,11 @@ class FullStackTestWindow(QWidget):
         """Receive processed LK result and update the detail window crosshair."""
         if roi_id >= len(self._detail_windows):
             return
+            
+        if processed.get("velocity_ready", False):
+            if roi_id < len(self.lk_plot_widgets):
+                self.lk_plot_widgets[roi_id].push(processed)
+                
         detail = self._detail_windows[roi_id]
         if detail is not None and detail.isVisible():
             dx = processed.get("dx_pixels", 0.0)
