@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QColor
 from PySide6.QtCore import Slot
+from collections import deque
 
 class LogBookInterface(QWidget):
     """
@@ -27,10 +28,12 @@ class LogBookInterface(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(0)  # Tightly stacked next to each other
         self.btn_all = QPushButton("All Data")
+        self.btn_velocity = QPushButton("Velocity Tracker")
         self.btn_important = QPushButton("Important Data")
         
         # Force toggle button styles
         self.btn_all.setCheckable(True)
+        self.btn_velocity.setCheckable(True)
         self.btn_important.setCheckable(True)
         self.btn_all.setChecked(True)
         
@@ -39,11 +42,14 @@ class LogBookInterface(QWidget):
             QPushButton { padding: 6px 16px; border: 1px solid #444; font-weight: bold; background-color: #2b2b2b; }
             QPushButton:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; border-right: none; }
             QPushButton:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-left: none; }
+            QPushButton:not(:first-child):not(:last-child) { border-right: none; }
         """
         self.btn_all.setStyleSheet(base_style + "QPushButton:checked { background-color: #555555; color: white; }")
+        self.btn_velocity.setStyleSheet(base_style + "QPushButton:checked { background-color: #005577; color: white; }")
         self.btn_important.setStyleSheet(base_style + "QPushButton:checked { background-color: #8B0000; color: white; }")
         
         btn_layout.addWidget(self.btn_all)
+        btn_layout.addWidget(self.btn_velocity)
         btn_layout.addWidget(self.btn_important)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
@@ -67,39 +73,65 @@ class LogBookInterface(QWidget):
         )
         layout.addWidget(self.table)
         
-        # Memory tracking
-        self.all_logs = []
-        self.important_logs = []
+        # Memory tracking prevents out-of-memory array leaks
+        self.max_memory_logs = 2000
+        self.max_ui_rows = 500
+        
+        self.all_logs = deque(maxlen=self.max_memory_logs)
+        self.velocity_logs = deque(maxlen=self.max_memory_logs)
+        self.important_logs = deque(maxlen=self.max_memory_logs)
         
         # Bindings
         self.btn_all.clicked.connect(self._show_all)
+        self.btn_velocity.clicked.connect(self._show_velocity)
         self.btn_important.clicked.connect(self._show_important)
 
     def _show_all(self):
         if self.current_mode == "all": return
-        self.btn_all.setChecked(True)
-        self.btn_important.setChecked(False)
         self.current_mode = "all"
+        self._update_buttons()
+        self._refresh_table()
+
+    def _show_velocity(self):
+        if self.current_mode == "velocity": return
+        self.current_mode = "velocity"
+        self._update_buttons()
         self._refresh_table()
         
     def _show_important(self):
         if self.current_mode == "important": return
-        self.btn_all.setChecked(False)
-        self.btn_important.setChecked(True)
         self.current_mode = "important"
+        self._update_buttons()
         self._refresh_table()
+
+    def _update_buttons(self):
+        self.btn_all.setChecked(self.current_mode == "all")
+        self.btn_velocity.setChecked(self.current_mode == "velocity")
+        self.btn_important.setChecked(self.current_mode == "important")
 
     def _refresh_table(self):
         self.table.setRowCount(0)
-        source = self.all_logs if self.current_mode == "all" else self.important_logs
+        
+        if self.current_mode == "all":
+            source = self.all_logs
+        elif self.current_mode == "velocity":
+            source = self.velocity_logs
+        else:
+            source = self.important_logs
         
         # Prevent blocking if millions of updates exist by tracking capacity
         # (could introduce table capacity limits natively later if required)
-        for entry in source[-200:]: # Draw at most last 200 items smoothly on change
+        for entry in list(source)[-200:]: # Draw at most last 200 items smoothly on change
             self._add_row_to_table(entry)
             
     def _add_row_to_table(self, entry: dict):
         row = self.table.rowCount()
+        
+        # Prevent UI DOM memory bloat by strict purging of oldest visual DOM rows
+        if row >= self.max_ui_rows:
+            self.table.removeRow(0)
+            row = self.max_ui_rows - 1
+
         self.table.insertRow(row)
         
         # Format Timestamp (Drop Date, Round 2 decimals on seconds)
@@ -121,9 +153,16 @@ class LogBookInterface(QWidget):
         t_algo = QTableWidgetItem(algo_str)
         t_data = QTableWidgetItem(data_str)
         
-        # Optional: Color red if anomaly level mapped
-        if entry.get("level", 1) >= 2:
-            alert_color = QColor(100, 30, 30)
+        # Optional: Color styling
+        level = entry.get("level", 1)
+        alert_color = None
+        
+        if level >= 5:
+            alert_color = QColor(100, 30, 30)  # Red for anomalies
+        elif level == 2:
+            alert_color = QColor(20, 60, 80)   # Blue for velocity drops
+            
+        if alert_color:
             t_time.setBackground(alert_color)
             t_roi.setBackground(alert_color)
             t_algo.setBackground(alert_color)
@@ -141,10 +180,20 @@ class LogBookInterface(QWidget):
     def push_log(self, entry: dict):
         """Slot designed to ingest the live broadcast data object directly"""
         self.all_logs.append(entry)
-        is_important = entry.get("level", 1) >= 2
+        level = entry.get("level", 1)
+        
+        is_important = level >= 5
+        is_velocity  = level == 2
         
         if is_important:
             self.important_logs.append(entry)
+        if is_velocity:
+            self.velocity_logs.append(entry)
             
-        if self.current_mode == "all" or (self.current_mode == "important" and is_important):
+        # UI rendering update check
+        if self.current_mode == "all":
+            self._add_row_to_table(entry)
+        elif self.current_mode == "important" and is_important:
+            self._add_row_to_table(entry)
+        elif self.current_mode == "velocity" and is_velocity:
             self._add_row_to_table(entry)

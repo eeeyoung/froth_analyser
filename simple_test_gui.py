@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QCheckBox, QMessageBox, QApplication, QFileDialog,
     QGridLayout, QSizePolicy, QDialog, QDialogButtonBox,
-    QDoubleSpinBox
+    QDoubleSpinBox, QStackedWidget
 )
 from PySide6.QtCore import Slot, Qt
 import pyqtgraph as pg
@@ -141,6 +141,17 @@ class LBPPlotWidget(pg.PlotWidget):
         self._pc1 = deque(_zero, maxlen=self.HISTORY)
         self._pc2 = deque(_zero, maxlen=self.HISTORY)
 
+        # Track boolean anomaly states seamlessly aligned with the history deque
+        self._anomalies = deque([False] * self.HISTORY, maxlen=self.HISTORY)
+
+        self._anomaly_lines = []
+        for x_val in self._x:
+            # Create a 50% translucent dashed vertical red line for each x-coordinate
+            line = pg.InfiniteLine(pos=x_val, angle=90, pen=pg.mkPen(color=(255, 0, 0, 120), width=2, style=Qt.DashLine))
+            line.setVisible(False)
+            self.addItem(line)
+            self._anomaly_lines.append(line)
+
         legend = self.addLegend(offset=(-5, 5), labelTextColor="#c9d1d9", colCount=2)
         legend.setParentItem(self.graphicsItem())
 
@@ -169,9 +180,14 @@ class LBPPlotWidget(pg.PlotWidget):
 
         self._pc1.append(pc1)
         self._pc2.append(pc2)
+        self._anomalies.append(is_anomaly)
 
         self._curve_pc1.setData(self._x, list(self._pc1))
         self._curve_pc2.setData(self._x, list(self._pc2))
+        
+        # Toggle line visibility seamlessly with O(N) where N=120 ticks
+        for i, is_anom in enumerate(self._anomalies):
+            self._anomaly_lines[i].setVisible(is_anom)
         
         status_color = "#ff5555" if is_anomaly else "#50fa7b"
         status_text = "ANOMALY!" if is_anomaly else "Normal"
@@ -181,9 +197,18 @@ class LBPPlotWidget(pg.PlotWidget):
         zero = [0.0] * self.HISTORY
         self._pc1 = deque(zero, maxlen=self.HISTORY)
         self._pc2 = deque(zero, maxlen=self.HISTORY)
+        self._anomalies = deque([False] * self.HISTORY, maxlen=self.HISTORY)
+        
         self._curve_pc1.setData(self._x, zero)
         self._curve_pc2.setData(self._x, zero)
+        for line in self._anomaly_lines:
+            line.setVisible(False)
+            
         self.setTitle(f"ROI {self.roi_index + 1}  —  LBP PCA", color="#c9d1d9")
+
+    def set_roi_index(self, idx: int):
+        self.roi_index = idx
+        self.clear_data()
 
 
 # ---------------------------------------------------------------------------
@@ -280,16 +305,21 @@ class FullStackTestWindow(QWidget):
         self.chk_show_live.setStyleSheet("font-size: 11px; color: #cccccc;")
         right_panel.addWidget(self.chk_show_live)
 
+        self._selected_roi = 0
+
         self.crop_widgets     = []
         self.lbp_plot_widgets = []
         self._detail_windows: list[ROIDetailWindow | None] = []
-        self._roi_row_widgets = []
+        
+        thumbnails_layout = QHBoxLayout()
+        self.plot_stack = QStackedWidget()
 
         for i in range(self.roi_manager.max_rois):
-            # Thumbnail (plain — no crosshair overlay here any more)
-            crop = CroppedROIWidget(f"Empty Data\n(No ROI {i+1} found)\nClick to open live view")
+            # Thumbnail selector
+            crop = CroppedROIWidget(f"Empty Data\n(No ROI {i+1} found)\nDouble-click to open live view")
             crop.setFixedWidth(140)
             self.crop_widgets.append(crop)
+            thumbnails_layout.addWidget(crop)
 
             # Detail popup — created once, shown/hidden on click
             detail = ROIDetailWindow(
@@ -297,23 +327,22 @@ class FullStackTestWindow(QWidget):
                 lk_active=self.algo_state.is_active(_ALGO_LK),
             )
             self._detail_windows.append(detail)
-
-            # LBP chart
+            
+            # Independent LBP chart for THIS ROI placed directly into the invisible stack
             plot = LBPPlotWidget(roi_index=i)
             self.lbp_plot_widgets.append(plot)
+            self.plot_stack.addWidget(plot)
 
-            # Row widget for show/hide
-            row_widget = QWidget()
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.addWidget(crop, stretch=0)
-            row_layout.addWidget(plot, stretch=1)
+            # Wire thumbnail clicks
+            crop.clicked.connect(lambda checked=False, idx=i: self.select_roi(idx))
+            crop.double_clicked.connect(lambda checked=False, idx=i: self._open_detail(idx))
 
-            self._roi_row_widgets.append(row_widget)
-            right_panel.addWidget(row_widget, stretch=1)
+        thumbnails_layout.addStretch()
 
-            # Wire thumbnail click → open detail window (capture i by default-arg)
-            crop.clicked.connect(lambda checked=False, idx=i: self._open_detail(idx))
+        right_panel.addLayout(thumbnails_layout)
+        right_panel.addWidget(self.plot_stack, stretch=1)
+
+        self.select_roi(0)
 
         right_panel.addStretch(0)
 
@@ -377,8 +406,15 @@ class FullStackTestWindow(QWidget):
 
     @Slot(bool)
     def _toggle_live_data_panel(self, visible: bool):
-        for row_widget in self._roi_row_widgets:
-            row_widget.setVisible(visible)
+        for crop in self.crop_widgets:
+            crop.setVisible(visible)
+        self.plot_stack.setVisible(visible)
+
+    def select_roi(self, idx: int):
+        self._selected_roi = idx
+        for i, crop in enumerate(self.crop_widgets):
+            crop.set_selected(i == idx)
+        self.plot_stack.setCurrentIndex(idx)
 
     def _open_detail(self, roi_id: int):
         """Show or raise the detail popup for the given ROI."""
@@ -441,9 +477,8 @@ class FullStackTestWindow(QWidget):
 
     @Slot(int, object)
     def on_lbp_data(self, roi_id: int, processed: dict):
-        if roi_id >= len(self.lbp_plot_widgets):
-            return
-        self.lbp_plot_widgets[roi_id].push(processed)
+        if roi_id < len(self.lbp_plot_widgets):
+            self.lbp_plot_widgets[roi_id].push(processed)
 
     @Slot(int, object)
     def on_lk_data(self, roi_id: int, processed: dict):
@@ -462,7 +497,7 @@ class FullStackTestWindow(QWidget):
             if i >= len(self.roi_manager.rois):
                 self.crop_widgets[i].clear()
                 self.crop_widgets[i].setText(
-                    f"Empty Data\n(No ROI {i+1} found)\nClick to open live view"
+                    f"Empty Data\n(No ROI {i+1} found)\nDouble-click to open live view"
                 )
 
         if self.last_frame is not None and self.video_source._is_paused:

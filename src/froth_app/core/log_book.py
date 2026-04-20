@@ -13,7 +13,8 @@ from PySide6.QtCore import QObject, Signal
 
 class LogLevel:
     INFO = 1       # Standard raw data
-    IMPORTANT = 2  # Anomalies, rapid changes, critical events
+    VELOCITY = 2   # LK Algorithm structural analytics
+    IMPORTANT = 5  # Anomalies, rapid changes, critical events
 
 class LogBook(QObject):
     """
@@ -74,7 +75,9 @@ class LogBook(QObject):
             }
         elif algorithm == "LucasKanadeAlgorithm":
             filtered_data = {
-                "real_distance": data_payload.get("real_distance")
+                "real_distance": data_payload.get("real_distance"),
+                "velocity": data_payload.get("velocity"),
+                "velocity_ready": data_payload.get("velocity_ready")
             }
         else:
             filtered_data = data_payload.copy()

@@ -177,15 +177,30 @@ class ROIOverlayWidget(QWidget):
 class CroppedROIWidget(QLabel):
     """Auxiliary UI module that receives an OpenCV array and displays just a small crop."""
 
-    clicked = Signal()   # emitted when the user clicks the thumbnail
+    clicked = Signal()         # emitted when the user clicks the thumbnail
+    double_clicked = Signal()  # emitted when the user double-clicks the thumbnail
 
     def __init__(self, title=""):
         super().__init__()
-        self.setFixedSize(220, 220)
+        self.setFixedSize(220, 110)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("background-color: #1a1a1a; border: 1px solid #555; color: white;"
-                           "cursor: pointer;")
+        self._is_selected = False
+        self._update_style()
+        self.setCursor(Qt.PointingHandCursor)
         self.setText(title)
+
+    def set_selected(self, selected: bool):
+        self._is_selected = selected
+        self._update_style()
+
+    def _update_style(self):
+        border = "3px solid #00ff00" if self._is_selected else "1px solid #555"
+        self.setStyleSheet(f"background-color: #1a1a1a; border: {border}; color: white;")
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.double_clicked.emit()
+        super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

@@ -61,6 +61,9 @@ class GlobalDataHub(QThread):
         # LBP PCA State Handlers per ROI:
         # { roi_id: LBPPCAHandler }
         self._lbp_handlers: dict[int, LBPPCAHandler] = {}
+        
+        # Lucas Kanade 1-second Velocity tracking per ROI
+        self._lk_accumulators: dict[int, dict] = {}
 
     def run(self):
         self._is_running = True
@@ -103,6 +106,9 @@ class GlobalDataHub(QThread):
         level = LogLevel.INFO
         if processed.get("is_anomaly", False):
             level = LogLevel.IMPORTANT
+        elif processed.get("velocity_ready", False):
+            level = LogLevel.VELOCITY
+            
         self.log_book.record(level, roi_id, algo, processed)
 
         # --- Log to Console ---
@@ -127,6 +133,7 @@ class GlobalDataHub(QThread):
     # ------------------------------------------------------------------
 
     def _process_lucas_kanade(self, raw: dict) -> dict:
+        roi_id  = raw.get("roi_id", 0)
         dx_p    = raw.get("dx_pixels", 0.0)
         dy_p    = raw.get("dy_pixels", 0.0)
         tracked = raw.get("features_tracked", 0)
@@ -134,11 +141,38 @@ class GlobalDataHub(QThread):
         pixel_magnitude = math.sqrt(dx_p ** 2 + dy_p ** 2)
         real_distance   = self.calibration.get_real_distance(pixel_magnitude)
 
+        # 1-second velocity accumulator
+        current_time = time.time()
+        
+        if roi_id not in self._lk_accumulators:
+            self._lk_accumulators[roi_id] = {
+                "start_time": current_time,
+                "total_distance": 0.0
+            }
+            
+        accum = self._lk_accumulators[roi_id]
+        accum["total_distance"] += real_distance
+        
+        dt = current_time - accum["start_time"]
+        
+        velocity_ready = False
+        velocity = 0.0
+        
+        if dt >= 1.0:
+            velocity = accum["total_distance"] / dt
+            velocity_ready = True
+            
+            # Reset accumulator for next second
+            accum["start_time"] = current_time
+            accum["total_distance"] = 0.0
+
         return {
             "dx_pixels":       dx_p,
             "dy_pixels":       dy_p,
             "pixel_magnitude": pixel_magnitude,
             "real_distance":   real_distance,
+            "velocity":        velocity if velocity_ready else None,
+            "velocity_ready":  velocity_ready,
             "unit":            self.calibration.unit_name,
             "features_tracked": tracked,
         }
@@ -184,11 +218,14 @@ class GlobalDataHub(QThread):
     # ------------------------------------------------------------------
 
     def _format_lucas_kanade(self, processed: dict) -> str:
-        return (
+        base = (
             f"Vector(x:{processed['dx_pixels']:.2f}, y:{processed['dy_pixels']:.2f}) px -> "
             f"Moved: {processed['real_distance']:.4f} {processed['unit']}/frame | "
             f"Tracked {processed['features_tracked']} elements"
         )
+        if processed.get("velocity_ready"):
+            base += f" | VELOCITY: {processed['velocity']:.4f} {processed['unit']}/s"
+        return base
 
     def _format_lbp(self, processed: dict) -> str:
         base_str = (
