@@ -373,6 +373,7 @@ class FullStackTestWindow(QWidget):
                 detail.setAttribute(Qt.WA_DeleteOnClose, True)
                 detail.close()
         self.analyzer.shutdown_all()
+        self.data_hub.log_book.flush_and_close()
         self.data_hub.shutdown()
         self.video_source.release()
         super().closeEvent(event)

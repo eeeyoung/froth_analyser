@@ -3,6 +3,14 @@ log_book.py — Real-time Logging system for analysis data.
 
 Stores processed pipeline results into persistent real-time logs.
 Supports priority levelling to fork anomalies into dedicated IMPORTANT logs.
+
+Performance notes
+-----------------
+- File writes are batched: the write buffer is flushed to disk every
+  FLUSH_INTERVAL_SEC seconds (default 2.0) rather than on every frame.
+  This prevents open()/close() syscall overhead at 30+ fps.
+- The log_ready signal is only emitted for VELOCITY and IMPORTANT events,
+  not for every raw INFO frame, so the main thread is not flooded.
 """
 
 import os
@@ -21,9 +29,14 @@ class LogBook(QObject):
     Handles file-based storage of chronological data chunks.
     All data goes into the 'raw' log. Data hitting Level 2+ is also mirrored
     into the 'important' log.
+
+    Writes are buffered in memory and flushed to disk every FLUSH_INTERVAL_SEC
+    seconds to avoid per-frame file I/O overhead.
     """
     
     log_ready = Signal(dict)
+
+    FLUSH_INTERVAL_SEC = 2.0  # How often to flush the write buffer to disk
     
     def __init__(self, log_dir="logs", parent=None):
         super().__init__(parent)
@@ -34,10 +47,17 @@ class LogBook(QObject):
         session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.raw_log_path = os.path.join(self.log_dir, f"session_{session_time}_raw.jsonl")
         self.important_log_path = os.path.join(self.log_dir, f"session_{session_time}_IMPORTANT.jsonl")
+
+        # Write buffers — flushed on interval, not per-frame
+        self._raw_buffer: list[str] = []
+        self._important_buffer: list[str] = []
+        self._last_flush: float = time.monotonic()
         
     def record(self, level: int, roi_id: int, algorithm: str, data_payload: dict):
         """
         Record a piece of data to the required logs based on its priority level.
+        Writes are buffered; flush to disk every FLUSH_INTERVAL_SEC seconds.
+        The log_ready signal is only emitted for VELOCITY/IMPORTANT events.
         """
         log_entry = {
             "system_time": time.time(),
@@ -50,20 +70,42 @@ class LogBook(QObject):
         
         entry_json = json.dumps(log_entry) + "\n"
         
-        # 1. Always append to basic raw log
-        with open(self.raw_log_path, "a") as raw_file:
-            raw_file.write(entry_json)
+        # 1. Buffer to raw log
+        self._raw_buffer.append(entry_json)
             
-        # 2. Mirror to important log if level qualifies
+        # 2. Mirror to important buffer if level qualifies
         if level >= LogLevel.IMPORTANT:
-            with open(self.important_log_path, "a") as imp_file:
-                imp_file.write(entry_json)
-                print("IMPORTANT LOG:", entry_json)
+            self._important_buffer.append(entry_json)
+            print("IMPORTANT LOG:", entry_json)
 
-        self._release_to_logbook(log_entry, algorithm, data_payload)
+        # 3. Flush buffers to disk on interval (not every frame)
+        now = time.monotonic()
+        if now - self._last_flush >= self.FLUSH_INTERVAL_SEC:
+            self._flush()
+            self._last_flush = now
+
+        # 4. Emit UI signal only for meaningful events (not every raw INFO frame)
+        if level >= LogLevel.VELOCITY:
+            self._release_to_logbook(log_entry, algorithm, data_payload)
+
+    def _flush(self):
+        """Write buffered log entries to disk and clear the buffers."""
+        if self._raw_buffer:
+            with open(self.raw_log_path, "a") as f:
+                f.writelines(self._raw_buffer)
+            self._raw_buffer.clear()
+
+        if self._important_buffer:
+            with open(self.important_log_path, "a") as f:
+                f.writelines(self._important_buffer)
+            self._important_buffer.clear()
+
+    def flush_and_close(self):
+        """Force a final flush when the session ends (call from shutdown)."""
+        self._flush()
 
     def _release_to_logbook(self, log_entry: dict, algorithm: str, data_payload: dict):
-        # 3. Create a filtered copy for real-time UI components
+        # Create a filtered copy for real-time UI components
         ui_entry = log_entry.copy()
         filtered_data = {}
     

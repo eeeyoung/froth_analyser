@@ -48,7 +48,7 @@ class GlobalDataHub(QThread):
 
     def __init__(self, calibration_manager: CalibrationManager, parent=None):
         super().__init__(parent)
-        self.collection_queue = Queue()
+        self.collection_queue = Queue(maxsize=60)  # Bounded: workers drop results if DataHub falls behind
         self.calibration = calibration_manager
         self._is_running = False
         self.baseline_duration = 1.5

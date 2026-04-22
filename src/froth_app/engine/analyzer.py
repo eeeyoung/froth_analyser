@@ -7,12 +7,19 @@ ALGORITHM_REGISTRY maps integer IDs to algorithm classes.
 To register a new algorithm, add an entry here.
 
     1  → LucasKanadeAlgorithm
+    2  → LBPAlgorithm
     (future entries go here)
 
 ROIWorker
 ---------
 An independent multiprocessing.Process that runs a *list* of
 BaseAnalysisAlgorithm instances on a dedicated CPU core for one ROI stream.
+
+Frame data arrives via shared memory (zero-copy): the main thread writes the
+crop into a FrameSharedBuffer and puts a tiny FrameMeta namedtuple on the
+input_queue. The worker reconnects to the SharedMemory block by name and
+reconstructs the numpy array with a single memcpy — no pickle, no pipe data.
+
 Multiple algorithms can be loaded before the process starts via
 add_new_algorithm(); all of them run sequentially on every incoming frame
 and each posts its own result to the DataHub.
@@ -23,6 +30,12 @@ Main-thread manager. Accepts a list of algorithm IDs per ROI, resolves
 them through ALGORITHM_REGISTRY, spawns an ROIWorker, and loads it up
 before starting the process. Handles routing and lifecycle management.
 
+Shared memory lifecycle
+-----------------------
+Each ROI gets its own FrameSharedBuffer, allocated lazily on the first frame
+so the buffer is sized to the actual crop dimensions. The master is the sole
+owner and calls both close() and unlink() on teardown. Workers only close().
+
     Example — run LK (id=1) on ROI 0, and two algorithms on ROI 1:
         master.add_roi_stream(roi_id=0, algorithm_ids=[1])
         master.add_roi_stream(roi_id=1, algorithm_ids=[1, 2])
@@ -31,18 +44,18 @@ before starting the process. Handles routing and lifecycle management.
 import time
 import numpy as np
 from multiprocessing import Process, Queue
+from multiprocessing.shared_memory import SharedMemory
 from queue import Empty
 
 from froth_app.engine.algorithms.base import BaseAnalysisAlgorithm
 from froth_app.engine.algorithms.lucas_kanade import LucasKanadeAlgorithm
 from froth_app.engine.algorithms.lbp import LBPAlgorithm
+from froth_app.engine.frame_buffer import FrameSharedBuffer, FrameMeta
 
 
 # ---------------------------------------------------------------------------
 # Algorithm Registry
 # ---------------------------------------------------------------------------
-# Maps integer algorithm IDs (chosen by the user) to their algorithm classes.
-# Add new algorithms here as lower-level modules are developed.
 ALGORITHM_REGISTRY: dict[int, type[BaseAnalysisAlgorithm]] = {
     1: LucasKanadeAlgorithm,
     2: LBPAlgorithm,
@@ -54,13 +67,12 @@ class ROIWorker(Process):
     Independent background process dedicated to analysing a single ROI stream.
     Runs on a separate CPU core (true parallelism via multiprocessing).
 
-    Holds a list of BaseAnalysisAlgorithm instances. On every incoming frame
-    each algorithm is called in turn and its result is forwarded to the
-    DataHub independently, so consumers can distinguish algorithm outputs by
-    the 'algorithm' key in the result dict.
+    Receives FrameMeta signals via input_queue (tiny, ~40 bytes each), then
+    reads the actual pixel data directly from the named SharedMemory block —
+    no pickle serialization of frame arrays.
 
     IMPORTANT: add_new_algorithm() must be called BEFORE start(). After the
-    process is forked, parent-side mutations are not visible to the child.
+    process is spawned, parent-side mutations are not visible to the child.
     """
 
     def __init__(
@@ -78,32 +90,46 @@ class ROIWorker(Process):
     def add_new_algorithm(self, algorithm: BaseAnalysisAlgorithm) -> None:
         """
         Attach an algorithm to this worker.
-        Must be called before start() — multiprocessing copies state at fork time.
+        Must be called before start() — multiprocessing copies state at spawn time.
         """
         self.algorithms.append(algorithm)
 
     def run(self):
-        """Main execution loop — pure routing, zero algorithm logic here."""
+        """Main execution loop — reads frames from shared memory, runs algorithms."""
         algo_names = [type(a).__name__ for a in self.algorithms]
         print(
             f"[Worker {self.roi_id + 1} | {', '.join(algo_names) or 'no algorithms'}]"
-            f" Process booted successfully."
+            f" Process booted (shared memory mode)."
         )
+
+        # SharedMemory handle — attached lazily on receipt of the first FrameMeta
+        shm: SharedMemory | None = None
+        current_shm_name: str | None = None
 
         while True:
             try:
-                # 1. Grab the next crop from the pipe (timeout allows clean exit)
-                frame = self.input_queue.get(timeout=1.0)
+                # 1. Grab the next FrameMeta signal (tiny — metadata only, no pixels)
+                meta = self.input_queue.get(timeout=1.0)
 
                 # Poison pill — shut down cleanly
-                if frame is None:
+                if meta is None:
                     break
 
-                # 2. Run every loaded algorithm on the same frame
+                # 2. Attach to the shared memory block (once, or if name changes)
+                if meta.name != current_shm_name:
+                    if shm is not None:
+                        shm.close()
+                    shm = SharedMemory(name=meta.name, create=False)
+                    current_shm_name = meta.name
+
+                # 3. Read the frame crop — one memcpy, no pickle
+                frame = FrameSharedBuffer.read(shm, meta)
+
+                # 4. Run every loaded algorithm on the same frame
                 for algorithm in self.algorithms:
                     result = algorithm.process_frame(frame)
 
-                    # 3. Annotate and forward each result to the DataHub
+                    # 5. Annotate and forward each result to the DataHub
                     if result is not None:
                         result["roi_id"] = self.roi_id
                         result["timestamp"] = time.time()
@@ -119,6 +145,9 @@ class ROIWorker(Process):
                 print(f"[Worker {self.roi_id + 1}] Crashed: {e}")
                 break
 
+        # Close handle only — master is the owner and calls unlink()
+        if shm is not None:
+            shm.close()
         print(f"[Worker {self.roi_id + 1}] Shutting down safely.")
 
 
@@ -126,7 +155,7 @@ class AnalysisEngineMaster:
     """
     Manager running on the main thread.
     Spawns/terminates ROIWorker processes and routes video frame crops
-    to them. Performs no computation itself.
+    to them via shared memory. Performs no computation itself.
 
     Algorithm selection
     -------------------
@@ -144,7 +173,8 @@ class AnalysisEngineMaster:
     """
 
     def __init__(self, data_hub):
-        # Maps roi_id -> {"process": ROIWorker, "input_q": Queue}
+        # Maps roi_id → {"process": ROIWorker, "input_q": Queue,
+        #                 "buffer": FrameSharedBuffer | None}
         self.workers: dict = {}
         self.data_hub = data_hub
 
@@ -166,7 +196,7 @@ class AnalysisEngineMaster:
         if not algorithm_ids:
             algorithm_ids = [1]  # Default: LucasKanade
 
-        # Bounded queue — acts as a frame-drop throttle if the worker is slow
+        # Bounded queue — carries FrameMeta only (~40 bytes each); drop throttle
         input_queue = Queue(maxsize=15)
 
         # Create the worker (no algorithms yet)
@@ -196,10 +226,11 @@ class AnalysisEngineMaster:
         self.workers[roi_id] = {
             "process": worker,
             "input_q": input_queue,
+            "buffer": None,  # FrameSharedBuffer — allocated lazily on first frame
         }
 
     def remove_roi_stream(self, roi_id: int):
-        """Safely terminate a worker process and free the CPU core."""
+        """Safely terminate a worker, release its shared memory, and free the core."""
         if roi_id not in self.workers:
             return
 
@@ -215,23 +246,50 @@ class AnalysisEngineMaster:
         if worker_proc.is_alive():
             worker_proc.terminate()
 
+        # Release and destroy the shared memory block (master is owner)
+        buf: FrameSharedBuffer | None = self.workers[roi_id].get("buffer")
+        if buf is not None:
+            buf.close()
+            buf.unlink()
+
         del self.workers[roi_id]
 
     def process_frame(self, frame: np.ndarray, roi_list: list):
         """
-        Slice the full video frame into ROI crops and dispatch each crop
-        to its corresponding worker queue (non-blocking).
+        Slice the full video frame into ROI crops, write each into its shared
+        memory buffer, and dispatch a lightweight FrameMeta signal to the
+        worker queue (non-blocking). No frame pixel data goes through the queue.
         """
         for i, (x, y, w, h) in enumerate(roi_list):
-            if i in self.workers:
-                crop = frame[y : y + h, x : x + w]
-                if crop.size > 0:
-                    try:
-                        self.workers[i]["input_q"].put_nowait(crop)
-                    except Exception:
-                        pass  # Drop frame gracefully if the 15-frame queue is full
+            if i not in self.workers:
+                continue
+
+            crop = frame[y: y + h, x: x + w]
+            if crop.size == 0:
+                continue
+
+            worker_data = self.workers[i]
+
+            # Lazy init: allocate the shared buffer on the first frame for this ROI,
+            # sized exactly to the actual crop dimensions (not a fixed maximum).
+            if worker_data["buffer"] is None:
+                ch = crop.shape[2] if crop.ndim == 3 else 1
+                worker_data["buffer"] = FrameSharedBuffer(
+                    crop.shape[0], crop.shape[1], ch, crop.dtype
+                )
+                print(
+                    f"[AnalysisEngineMaster] ROI {i + 1}: shared buffer allocated "
+                    f"({crop.shape[0]}x{crop.shape[1]}x{ch} {crop.dtype}, "
+                    f"name='{worker_data['buffer'].name}')."
+                )
+
+            try:
+                meta = worker_data["buffer"].write(crop)
+                worker_data["input_q"].put_nowait(meta)
+            except Exception:
+                pass  # Drop frame gracefully if the queue is full
 
     def shutdown_all(self):
-        """Terminate all active worker processes cleanly."""
+        """Terminate all active worker processes and free all shared memory."""
         for roi_id in list(self.workers.keys()):
             self.remove_roi_stream(roi_id)

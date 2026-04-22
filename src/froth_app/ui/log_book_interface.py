@@ -190,7 +190,10 @@ class LogBookInterface(QWidget):
         if is_velocity:
             self.velocity_logs.append(entry)
             
-        # UI rendering update check
+        # UI rendering update — skip entirely if window is not visible
+        if not self.isVisible():
+            return
+
         if self.current_mode == "all":
             self._add_row_to_table(entry)
         elif self.current_mode == "important" and is_important:
