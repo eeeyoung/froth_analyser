@@ -22,6 +22,8 @@ from src.froth_app.ui.roi_detail_window import ROIDetailWindow
 from src.froth_app.ui.log_book_interface import LogBookInterface
 from src.froth_app.ui.functions_dialog import FunctionsDialog
 from src.froth_app.ui.plot_widgets import LBPPlotWidget, VelocityPlotWidget
+from src.froth_app.ui.overflow_calibration_widget import OverflowCalibrationWidget
+from src.froth_app.ui.calibration_button import CalibrationButton
 from src.froth_app.core.calibration import CalibrationManager
 from src.froth_app.core.data_hub import GlobalDataHub
 from src.froth_app.core.algorithm_state import AlgorithmStateManager
@@ -42,7 +44,7 @@ class FullStackTestWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RT-FFAT: Full Stack Multi-Processing Test")
-        self.resize(1400, 900)
+        self.resize(1600, 900)
 
         # ==========================================
         # 1. Initialize All Core Engines
@@ -78,9 +80,11 @@ class FullStackTestWindow(QWidget):
 
         self.player_widget  = VideoPlayerWidget()
         self.overlay_widget = ROIOverlayWidget(self.player_widget, self.roi_manager)
+        self.calib_widget   = OverflowCalibrationWidget(self.calibration)
 
         canvas_layout.addWidget(self.player_widget,  0, 0)
         canvas_layout.addWidget(self.overlay_widget, 0, 0)
+        canvas_layout.addWidget(self.calib_widget,   0, 0)
         left_panel.addWidget(self.canvas_container, stretch=1)
 
         # --- Base Buttons ---
@@ -89,6 +93,7 @@ class FullStackTestWindow(QWidget):
         self.btn_load_cam   = QPushButton("1. Camera")
         self.btn_load_video = QPushButton("2. Video")
         self.btn_play_pause = QPushButton("3. Play")
+        self.btn_calibration = CalibrationButton()
 
         self.btn_functions = QPushButton("4. Functions")
         self.btn_functions.setStyleSheet("background-color: #555555; color: white;")
@@ -99,6 +104,7 @@ class FullStackTestWindow(QWidget):
         btn_layout.addWidget(self.btn_load_cam)
         btn_layout.addWidget(self.btn_load_video)
         btn_layout.addWidget(self.btn_play_pause)
+        btn_layout.addWidget(self.btn_calibration)
         btn_layout.addWidget(self.btn_functions)
         btn_layout.addWidget(self.btn_logbook)
         left_panel.addLayout(btn_layout)
@@ -193,9 +199,11 @@ class FullStackTestWindow(QWidget):
         self.btn_functions.clicked.connect(self.open_functions_dialog)
         self.btn_logbook.clicked.connect(self.open_log_book)
 
-        self.btn_add_roi.clicked.connect(
-            lambda: self.overlay_widget.enable_drawing(True)
-        )
+        # Calibration button signals
+        self.btn_calibration.overflow_requested.connect(self._start_overflow_calibration)
+        self.btn_calibration.overflow_confirmed.connect(self._confirm_overflow_calibration)
+
+        self.btn_add_roi.clicked.connect(self._try_add_roi)
         self.btn_undo_roi.clicked.connect(self.undo_roi)
         self.overlay_widget.roi_finalized.connect(self.on_roi_finalized)
 
@@ -265,6 +273,31 @@ class FullStackTestWindow(QWidget):
     # ==========================================
     # 5. Multiprocessing Event Managers
     # ==========================================
+    # ==========================================
+    # Calibration Handlers
+    # ==========================================
+    def _start_overflow_calibration(self):
+        """Show the compass overlay for overflow direction calibration."""
+        self.calib_widget.activate()
+
+    def _confirm_overflow_calibration(self):
+        """User confirmed — store calibration and hide the overlay."""
+        self.calibration.confirm_overflow()
+        self.calib_widget.deactivate()
+
+    def _try_add_roi(self):
+        """Guard ROI drawing: requires overflow calibration first."""
+        if not self.calibration.overflow_calibrated:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self, "Calibration Required",
+                "Please calibrate the overflow direction before drawing ROIs.\n\n"
+                "Click  Calibration → Overflow Direction,  set the needle, "
+                "then click  ✓ Confirm Overflow."
+            )
+            return
+        self.overlay_widget.enable_drawing(True)
+
     def on_roi_finalized(self):
         """Called when user finishes drawing a valid green box."""
         new_roi_id = len(self.roi_manager.rois) - 1

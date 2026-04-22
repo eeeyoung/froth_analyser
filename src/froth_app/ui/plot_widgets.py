@@ -12,7 +12,7 @@ from PySide6.QtCore import Slot, Qt, QRectF
 class LBPPlotWidget(pg.PlotWidget):
     """Live scrolling PCA scatter chart for one ROI."""
 
-    HISTORY = 120
+    HISTORY = 200
 
     def __init__(self, roi_index: int, parent=None):
         super().__init__(parent)

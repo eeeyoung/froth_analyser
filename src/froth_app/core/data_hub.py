@@ -138,20 +138,29 @@ class GlobalDataHub(QThread):
         dy_p    = raw.get("dy_pixels", 0.0)
         tracked = raw.get("features_tracked", 0)
 
-        pixel_magnitude = math.sqrt(dx_p ** 2 + dy_p ** 2)
-        real_distance   = self.calibration.get_real_distance(pixel_magnitude)
+        # --- Project displacement onto overflow axis ---
+        # axis_x, axis_y are in image space (y positive = downward)
+        # Result is signed: + = moving WITH overflow, - = moving AGAINST it
+        ax, ay = self.calibration.get_overflow_axis_image()
+        projected_pixels = dx_p * ax + dy_p * ay
 
-        # 1-second velocity accumulator
+        # Also keep Euclidean magnitude for diagnostics
+        pixel_magnitude = math.sqrt(dx_p ** 2 + dy_p ** 2)
+
+        # Real-world conversion uses the projected (directional) component
+        real_distance = self.calibration.get_real_distance(abs(projected_pixels))
+
+        # 1-second velocity accumulator (signed)
         current_time = time.time()
         
         if roi_id not in self._lk_accumulators:
             self._lk_accumulators[roi_id] = {
                 "start_time": current_time,
-                "total_distance": 0.0
+                "total_projected": 0.0
             }
             
         accum = self._lk_accumulators[roi_id]
-        accum["total_distance"] += real_distance
+        accum["total_projected"] += projected_pixels
         
         dt = current_time - accum["start_time"]
         
@@ -159,22 +168,23 @@ class GlobalDataHub(QThread):
         velocity = 0.0
         
         if dt >= 1.0:
-            velocity = accum["total_distance"] / dt
+            # Convert signed pixel sum to real-world signed velocity
+            velocity = self.calibration.get_real_distance(accum["total_projected"]) / dt
             velocity_ready = True
-            
-            # Reset accumulator for next second
             accum["start_time"] = current_time
-            accum["total_distance"] = 0.0
+            accum["total_projected"] = 0.0
 
         return {
-            "dx_pixels":       dx_p,
-            "dy_pixels":       dy_p,
-            "pixel_magnitude": pixel_magnitude,
-            "real_distance":   real_distance,
-            "velocity":        velocity if velocity_ready else None,
-            "velocity_ready":  velocity_ready,
-            "unit":            self.calibration.unit_name,
-            "features_tracked": tracked,
+            "dx_pixels":         dx_p,
+            "dy_pixels":         dy_p,
+            "pixel_magnitude":   pixel_magnitude,
+            "projected_pixels":  projected_pixels,
+            "real_distance":     real_distance,
+            "velocity":          velocity if velocity_ready else None,
+            "velocity_ready":    velocity_ready,
+            "unit":              self.calibration.unit_name,
+            "overflow_deg":      self.calibration.overflow_direction_visual,
+            "features_tracked":  tracked,
         }
 
     def _process_lbp(self, raw: dict) -> dict:
