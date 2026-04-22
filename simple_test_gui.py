@@ -7,9 +7,9 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QCheckBox, QMessageBox, QApplication, QFileDialog,
     QGridLayout, QSizePolicy, QDialog, QDialogButtonBox,
-    QDoubleSpinBox, QStackedWidget
+    QDoubleSpinBox, QStackedWidget, QGraphicsEllipseItem
 )
-from PySide6.QtCore import Slot, Qt
+from PySide6.QtCore import Slot, Qt, QRectF
 import pyqtgraph as pg
 
 # Allow imports if run directly from root
@@ -20,6 +20,8 @@ from src.froth_app.core.roi_manager import ROICoordinateManager
 from src.froth_app.ui.roi_overlay import ROIOverlayWidget, CroppedROIWidget
 from src.froth_app.ui.roi_detail_window import ROIDetailWindow
 from src.froth_app.ui.log_book_interface import LogBookInterface
+from src.froth_app.ui.functions_dialog import FunctionsDialog
+from src.froth_app.ui.plot_widgets import LBPPlotWidget, VelocityPlotWidget
 from src.froth_app.core.calibration import CalibrationManager
 from src.froth_app.core.data_hub import GlobalDataHub
 from src.froth_app.core.algorithm_state import AlgorithmStateManager
@@ -30,234 +32,7 @@ _ALGO_LK  = 1
 _ALGO_LBP = 2
 
 
-# ---------------------------------------------------------------------------
-# Functions Selection Dialog
-# ---------------------------------------------------------------------------
-class FunctionsDialog(QDialog):
-    """
-    Popup listing available analysis functions.
-    Checkbox states are pre-populated from AlgorithmStateManager and written
-    back to it when the user confirms.
-    """
 
-    def __init__(self, algo_state: AlgorithmStateManager, data_hub: GlobalDataHub, parent=None):
-        super().__init__(parent)
-        self._algo_state = algo_state
-        self._data_hub = data_hub
-
-        self.setWindowTitle("Analysis Functions")
-        self.setFixedSize(320, 220)
-        self.setStyleSheet("background-color: #1e1e1e; color: #e0e0e0;")
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(18, 18, 18, 18)
-
-        title = QLabel("Select functions to run on each ROI:")
-        title.setStyleSheet("font-size: 11px; color: #aaaaaa;")
-        layout.addWidget(title)
-
-        # Build spinbox for LBP Baseline config
-        self._lbp_duration_spinbox = QDoubleSpinBox()
-        self._lbp_duration_spinbox.setRange(0.5, 100.0)
-        self._lbp_duration_spinbox.setSingleStep(0.5)
-        self._lbp_duration_spinbox.setValue(self._data_hub.baseline_duration)
-        self._lbp_duration_spinbox.setSuffix(" s")
-        self._lbp_duration_spinbox.setStyleSheet(
-            "QDoubleSpinBox { font-size: 12px; background-color: #2c2c2c; "
-            "color: white; border: 1px solid #444; border-radius: 3px; padding: 2px; }"
-        )
-        self._lbp_duration_container = QWidget()
-        dur_layout = QHBoxLayout(self._lbp_duration_container)
-        dur_layout.setContentsMargins(24, 0, 0, 0)
-        lbl = QLabel("↳ Baseline duration:")
-        lbl.setStyleSheet("font-size: 11px; color: #888888;")
-        dur_layout.addWidget(lbl)
-        dur_layout.addWidget(self._lbp_duration_spinbox)
-        dur_layout.addStretch()
-
-        # Build one checkbox per algorithm, pre-populated from state
-        self._checkboxes: dict[int, QCheckBox] = {}
-        for algo_id, label in AlgorithmStateManager.ALGORITHM_LABELS.items():
-            chk = QCheckBox(label)
-            chk.setChecked(algo_state.is_active(algo_id))
-            chk.setStyleSheet("font-size: 12px;")
-            layout.addWidget(chk)
-            self._checkboxes[algo_id] = chk
-            
-            if algo_id == _ALGO_LBP:
-                layout.addWidget(self._lbp_duration_container)
-                self._lbp_duration_container.setVisible(chk.isChecked())
-                chk.toggled.connect(self._lbp_duration_container.setVisible)
-
-        # Confirm button
-        btn_box = QDialogButtonBox(QDialogButtonBox.Ok)
-        btn_box.setStyleSheet(
-            "QPushButton { background-color: #3a3a3a; color: white; "
-            "border-radius: 4px; padding: 4px 14px; }"
-            "QPushButton:hover { background-color: #555555; }"
-        )
-        btn_box.accepted.connect(self._on_confirm)
-        layout.addWidget(btn_box)
-
-    def _on_confirm(self):
-        """Write checkbox states back to AlgorithmStateManager, then close."""
-        snapshot = {
-            algo_id: chk.isChecked()
-            for algo_id, chk in self._checkboxes.items()
-        }
-        self._algo_state.apply_snapshot(snapshot)
-        
-        # Sync the baseline duration value to the data hub seamlessly
-        self._data_hub.update_baseline_duration(self._lbp_duration_spinbox.value())
-        
-        self.accept()
-
-
-# ---------------------------------------------------------------------------
-# LBP Time-Series Plot Widget
-# ---------------------------------------------------------------------------
-class LBPPlotWidget(pg.PlotWidget):
-    """Live scrolling PCA chart for one ROI."""
-
-    HISTORY = 120
-
-    def __init__(self, roi_index: int, parent=None):
-        super().__init__(parent)
-
-        self.roi_index = roi_index
-        self.setBackground("#0d1117")
-        self.setTitle(f"ROI {roi_index + 1}  —  LBP PCA",
-                      color="#c9d1d9", size="8pt")
-        self.showGrid(x=True, y=True, alpha=0.15)
-        self.setLabel("left", "PCA Projection", color="#8b949e", size="8pt")
-        self.getAxis("bottom").setStyle(showValues=False)
-        self.getAxis("left").setWidth(38)
-        self.setMinimumHeight(130)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        self._x = list(range(self.HISTORY))
-        _zero = [0.0] * self.HISTORY
-        self._pc1 = deque(_zero, maxlen=self.HISTORY)
-        self._pc2 = deque(_zero, maxlen=self.HISTORY)
-
-        # Track boolean anomaly states seamlessly aligned with the history deque
-        self._anomalies = deque([False] * self.HISTORY, maxlen=self.HISTORY)
-
-        self._anomaly_lines = []
-        for x_val in self._x:
-            # Create a 50% translucent dashed vertical red line for each x-coordinate
-            line = pg.InfiniteLine(pos=x_val, angle=90, pen=pg.mkPen(color=(255, 0, 0, 120), width=2, style=Qt.DashLine))
-            line.setVisible(False)
-            self.addItem(line)
-            self._anomaly_lines.append(line)
-
-        legend = self.addLegend(offset=(-5, 5), labelTextColor="#c9d1d9", colCount=2)
-        legend.setParentItem(self.graphicsItem())
-
-        self._curve_pc1 = self.plot(
-            self._x, list(self._pc1),
-            pen=pg.mkPen("#ff79c6", width=2.0),
-            name="PC 1",
-        )
-        self._curve_pc2 = self.plot(
-            self._x, list(self._pc2),
-            pen=pg.mkPen("#8be9fd", width=2.0),
-            name="PC 2",
-        )
-
-    @Slot(object)
-    def push(self, data: dict):
-        if data.get("is_baseline", True):
-            elapsed = data.get("elapsed", 0.0)
-            self.setTitle(f"ROI {self.roi_index + 1}  —  Baseline: {elapsed:.1f}s", color="#f1fa8c")
-            return
-            
-        pc1 = data.get("pc1", 0.0)
-        pc2 = data.get("pc2", 0.0)
-        t_sq = data.get("t_squared", 0.0)
-        is_anomaly = data.get("is_anomaly", False)
-
-        self._pc1.append(pc1)
-        self._pc2.append(pc2)
-        self._anomalies.append(is_anomaly)
-
-        self._curve_pc1.setData(self._x, list(self._pc1))
-        self._curve_pc2.setData(self._x, list(self._pc2))
-        
-        # Toggle line visibility seamlessly with O(N) where N=120 ticks
-        for i, is_anom in enumerate(self._anomalies):
-            self._anomaly_lines[i].setVisible(is_anom)
-        
-        status_color = "#ff5555" if is_anomaly else "#50fa7b"
-        status_text = "ANOMALY!" if is_anomaly else "Normal"
-        self.setTitle(f"ROI {self.roi_index + 1}  —  T²: {t_sq:.1f} ({status_text})", color=status_color)
-
-    def clear_data(self):
-        zero = [0.0] * self.HISTORY
-        self._pc1 = deque(zero, maxlen=self.HISTORY)
-        self._pc2 = deque(zero, maxlen=self.HISTORY)
-        self._anomalies = deque([False] * self.HISTORY, maxlen=self.HISTORY)
-        
-        self._curve_pc1.setData(self._x, zero)
-        self._curve_pc2.setData(self._x, zero)
-        for line in self._anomaly_lines:
-            line.setVisible(False)
-            
-        self.setTitle(f"ROI {self.roi_index + 1}  —  LBP PCA", color="#c9d1d9")
-
-    def set_roi_index(self, idx: int):
-        self.roi_index = idx
-        self.clear_data()
-
-# ---------------------------------------------------------------------------
-# Velocity Time-Series Plot Widget
-# ---------------------------------------------------------------------------
-class VelocityPlotWidget(pg.PlotWidget):
-    """Live scrolling Velocity chart for one ROI."""
-
-    HISTORY = 60 # Store 60 seconds of history at 1 tick/second
-
-    def __init__(self, roi_index: int, parent=None):
-        super().__init__(parent)
-
-        self.roi_index = roi_index
-        self.setBackground("#0d1117")
-        self.setTitle(f"ROI {roi_index + 1}  —  Velocity",
-                      color="#c9d1d9", size="8pt")
-        self.showGrid(x=True, y=True, alpha=0.15)
-        self.setLabel("left", "Velocity", color="#8b949e", size="8pt")
-        self.getAxis("bottom").setStyle(showValues=False)
-        self.getAxis("left").setWidth(38)
-        self.setMinimumHeight(130)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        self._x = list(range(self.HISTORY))
-        _zero = [0.0] * self.HISTORY
-        self._velocity = deque(_zero, maxlen=self.HISTORY)
-
-        self._curve = self.plot(
-            self._x, list(self._velocity),
-            pen=pg.mkPen("#f1fa8c", width=2.0),
-            name="Velocity",
-            fillLevel=0, fillBrush=(241, 250, 140, 50)
-        )
-
-    @Slot(object)
-    def push(self, data: dict):
-        vel = data.get("velocity", 0.0)
-        unit = data.get("unit", "px")
-        
-        self._velocity.append(vel)
-        self._curve.setData(self._x, list(self._velocity))
-        
-        self.setTitle(f"ROI {self.roi_index + 1}  —  Velocity: {vel:.4f} {unit}/s", color="#f1fa8c")
-
-    def clear_data(self):
-        zero = [0.0] * self.HISTORY
-        self._velocity = deque(zero, maxlen=self.HISTORY)
-        self._curve.setData(self._x, zero)
-        self.setTitle(f"ROI {self.roi_index + 1}  —  Velocity", color="#c9d1d9")
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +42,7 @@ class FullStackTestWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RT-FFAT: Full Stack Multi-Processing Test")
-        self.resize(1600, 700)
+        self.resize(1400, 900)
 
         # ==========================================
         # 1. Initialize All Core Engines

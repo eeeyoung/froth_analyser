@@ -69,6 +69,10 @@ class LBPPCAHandler:
                 "is_baseline": False,
                 "pc1": float(coords[0]),
                 "pc2": float(coords[1]),
+                "mean_pc1": float(self.mean_pc[0]),
+                "mean_pc2": float(self.mean_pc[1]),
+                "std_pc1": float(self.std_pc[0]),
+                "std_pc2": float(self.std_pc[1]),
                 "t_squared": t_squared,
                 "is_anomaly": is_anomaly,
                 "elapsed": elapsed
