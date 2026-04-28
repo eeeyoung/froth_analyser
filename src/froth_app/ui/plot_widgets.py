@@ -77,6 +77,13 @@ class LBPPlotWidget(pg.PlotWidget):
             # Plot the principal eigenvector axis directly along PC1
             self._fit_line.setData([m1 - a, m1 + a], [m2, m2])
             
+            # Dynamically attach variance labels to the physical axes
+            if "var_pc1" in data and "var_pc2" in data:
+                v1 = data["var_pc1"] * 100
+                v2 = data["var_pc2"] * 100
+                self.setLabel("bottom", f"PC 1 ({v1:.1f}%)", color="#8b949e", size="8pt")
+                self.setLabel("left", f"PC 2 ({v2:.1f}%)", color="#8b949e", size="8pt")
+            
         if is_anomaly:
             self._brushes.append(pg.mkBrush(255, 50, 50, 200)) # Larger deep red
             self._sizes.append(12)
@@ -103,6 +110,9 @@ class LBPPlotWidget(pg.PlotWidget):
         
         self._confidence_ellipse.hide()
         self._fit_line.setData([], [])
+        
+        self.setLabel("bottom", "PC 1", color="#8b949e", size="8pt")
+        self.setLabel("left", "PC 2", color="#8b949e", size="8pt")
         
         self._scatter.setData(x=[], y=[], brush=[], size=[])
             

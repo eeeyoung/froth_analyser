@@ -73,6 +73,8 @@ class LBPPCAHandler:
                 "mean_pc2": float(self.mean_pc[1]),
                 "std_pc1": float(self.std_pc[0]),
                 "std_pc2": float(self.std_pc[1]),
+                "var_pc1": float(self.pca.explained_variance_ratio_[0]),
+                "var_pc2": float(self.pca.explained_variance_ratio_[1]),
                 "t_squared": t_squared,
                 "is_anomaly": is_anomaly,
                 "elapsed": elapsed

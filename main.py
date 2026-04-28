@@ -17,5 +17,12 @@ if __name__ == "__main__":
 # Confidence interval # Done
 # PC 1&2 # Done
 # PCA model - feed the data of the first few seconds, the project later data on it # Done
-# Air Flow configuration, reagent flows 
-# Boiling froth - predict in advance 
+# Air Flow configuration, reagent flows
+# Boiling froth - predict in advance
+
+# Scatter plot - PC1 vs PC2 
+# TIme window ~ 1 minute - Dots are fainted
+# Optional - Dynamically adapt new data for model adjustment
+
+# t-squared & q-statistics
+# sqaure prediction error
