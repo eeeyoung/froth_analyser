@@ -167,3 +167,93 @@ class VelocityPlotWidget(pg.PlotWidget):
         self._velocity = deque(zero, maxlen=self.HISTORY)
         self._curve.setData(self._x, zero)
         self.setTitle(f"ROI {self.roi_index + 1}  —  Velocity", color="#c9d1d9")
+
+class TSquarePlotWidget(pg.PlotWidget):
+    """Live scrolling T-squared chart for one ROI."""
+
+    HISTORY = 200
+
+    def __init__(self, roi_index: int, parent=None):
+        super().__init__(parent)
+        self.roi_index = roi_index
+        self.setBackground("#0d1117")
+        self.setTitle(f"ROI {roi_index + 1}  —  T-squared", color="#c9d1d9", size="8pt")
+        self.showGrid(x=True, y=True, alpha=0.15)
+        self.setLabel("left", "T²", color="#8b949e", size="8pt")
+        self.getAxis("bottom").setStyle(showValues=False)
+        self.getAxis("left").setWidth(38)
+        self.setMinimumHeight(90)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self._x = list(range(self.HISTORY))
+        _zero = [0.0] * self.HISTORY
+        self._t2 = deque(_zero, maxlen=self.HISTORY)
+
+        self._curve = self.plot(
+            self._x, list(self._t2),
+            pen=pg.mkPen("#ff5555", width=2.0),
+            name="T-squared",
+            fillLevel=0, fillBrush=(255, 85, 85, 50)
+        )
+
+    @Slot(object)
+    def push(self, data: dict):
+        if data.get("is_baseline", True):
+            return
+        t_sq = data.get("t_squared", 0.0)
+        self._t2.append(t_sq)
+        self._curve.setData(self._x, list(self._t2))
+        
+        is_anomaly = data.get("is_anomaly", False)
+        status_color = "#ff5555" if is_anomaly else "#50fa7b"
+        self.setTitle(f"ROI {self.roi_index + 1}  —  T²: {t_sq:.2f}", color=status_color)
+
+    def clear_data(self):
+        zero = [0.0] * self.HISTORY
+        self._t2 = deque(zero, maxlen=self.HISTORY)
+        self._curve.setData(self._x, zero)
+        self.setTitle(f"ROI {self.roi_index + 1}  —  T-squared", color="#c9d1d9")
+
+class QStatisticPlotWidget(pg.PlotWidget):
+    """Live scrolling Q-statistic chart for one ROI."""
+
+    HISTORY = 200
+
+    def __init__(self, roi_index: int, parent=None):
+        super().__init__(parent)
+        self.roi_index = roi_index
+        self.setBackground("#0d1117")
+        self.setTitle(f"ROI {roi_index + 1}  —  Q-statistic", color="#c9d1d9", size="8pt")
+        self.showGrid(x=True, y=True, alpha=0.15)
+        self.setLabel("left", "Q (SPE)", color="#8b949e", size="8pt")
+        self.getAxis("bottom").setStyle(showValues=False)
+        self.getAxis("left").setWidth(38)
+        self.setMinimumHeight(90)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self._x = list(range(self.HISTORY))
+        _zero = [0.0] * self.HISTORY
+        self._q = deque(_zero, maxlen=self.HISTORY)
+
+        self._curve = self.plot(
+            self._x, list(self._q),
+            pen=pg.mkPen("#bd93f9", width=2.0),
+            name="Q-statistic",
+            fillLevel=0, fillBrush=(189, 147, 249, 50)
+        )
+
+    @Slot(object)
+    def push(self, data: dict):
+        if data.get("is_baseline", True):
+            return
+        q_stat = data.get("q_statistic", 0.0)
+        self._q.append(q_stat)
+        self._curve.setData(self._x, list(self._q))
+        
+        self.setTitle(f"ROI {self.roi_index + 1}  —  Q: {q_stat:.2f}", color="#bd93f9")
+
+    def clear_data(self):
+        zero = [0.0] * self.HISTORY
+        self._q = deque(zero, maxlen=self.HISTORY)
+        self._curve.setData(self._x, zero)
+        self.setTitle(f"ROI {self.roi_index + 1}  —  Q-statistic", color="#c9d1d9")

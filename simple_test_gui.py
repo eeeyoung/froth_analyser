@@ -21,7 +21,7 @@ from src.froth_app.ui.roi_overlay import ROIOverlayWidget, CroppedROIWidget
 from src.froth_app.ui.roi_detail_window import ROIDetailWindow
 from src.froth_app.ui.log_book_interface import LogBookInterface
 from src.froth_app.ui.functions_dialog import FunctionsDialog
-from src.froth_app.ui.plot_widgets import LBPPlotWidget, VelocityPlotWidget
+from src.froth_app.ui.plot_widgets import LBPPlotWidget, VelocityPlotWidget, TSquarePlotWidget, QStatisticPlotWidget
 from src.froth_app.ui.overflow_calibration_widget import OverflowCalibrationWidget
 from src.froth_app.ui.calibration_button import CalibrationButton
 from src.froth_app.core.calibration import CalibrationManager
@@ -139,11 +139,15 @@ class FullStackTestWindow(QWidget):
 
         self.crop_widgets     = []
         self.lbp_plot_widgets = []
+        self.t2_plot_widgets  = []
+        self.q_plot_widgets   = []
         self.lk_plot_widgets  = []
         self._detail_windows: list[ROIDetailWindow | None] = []
         
         thumbnails_layout = QHBoxLayout()
         self.plot_stack = QStackedWidget()
+        self.t2_plot_stack = QStackedWidget()
+        self.q_plot_stack = QStackedWidget()
         self.vel_plot_stack = QStackedWidget()
 
         for i in range(self.roi_manager.max_rois):
@@ -165,6 +169,16 @@ class FullStackTestWindow(QWidget):
             self.lbp_plot_widgets.append(plot)
             self.plot_stack.addWidget(plot)
             
+            # T-squared chart
+            t2plot = TSquarePlotWidget(roi_index=i)
+            self.t2_plot_widgets.append(t2plot)
+            self.t2_plot_stack.addWidget(t2plot)
+            
+            # Q-statistic chart
+            qplot = QStatisticPlotWidget(roi_index=i)
+            self.q_plot_widgets.append(qplot)
+            self.q_plot_stack.addWidget(qplot)
+            
             # Independent Velocity chart for THIS ROI placed directly into the invisible stack
             vplot = VelocityPlotWidget(roi_index=i)
             self.lk_plot_widgets.append(vplot)
@@ -177,7 +191,9 @@ class FullStackTestWindow(QWidget):
         thumbnails_layout.addStretch()
 
         right_panel.addLayout(thumbnails_layout)
-        right_panel.addWidget(self.plot_stack, stretch=1)
+        right_panel.addWidget(self.plot_stack, stretch=3)
+        right_panel.addWidget(self.t2_plot_stack, stretch=1)
+        right_panel.addWidget(self.q_plot_stack, stretch=1)
         right_panel.addWidget(self.vel_plot_stack, stretch=1)
 
         self.select_roi(0)
@@ -249,6 +265,8 @@ class FullStackTestWindow(QWidget):
         for crop in self.crop_widgets:
             crop.setVisible(visible)
         self.plot_stack.setVisible(visible)
+        self.t2_plot_stack.setVisible(visible)
+        self.q_plot_stack.setVisible(visible)
         self.vel_plot_stack.setVisible(visible)
 
     def select_roi(self, idx: int):
@@ -256,6 +274,8 @@ class FullStackTestWindow(QWidget):
         for i, crop in enumerate(self.crop_widgets):
             crop.set_selected(i == idx)
         self.plot_stack.setCurrentIndex(idx)
+        self.t2_plot_stack.setCurrentIndex(idx)
+        self.q_plot_stack.setCurrentIndex(idx)
         self.vel_plot_stack.setCurrentIndex(idx)
 
     def _open_detail(self, roi_id: int):
@@ -310,6 +330,8 @@ class FullStackTestWindow(QWidget):
             last_roi_id = len(self.roi_manager.rois) - 1
             self.analyzer.remove_roi_stream(last_roi_id)
             self.lbp_plot_widgets[last_roi_id].clear_data()
+            self.t2_plot_widgets[last_roi_id].clear_data()
+            self.q_plot_widgets[last_roi_id].clear_data()
             self.lk_plot_widgets[last_roi_id].clear_data()
             self._last_crops[last_roi_id] = None
             detail = self._detail_windows[last_roi_id]
@@ -347,6 +369,8 @@ class FullStackTestWindow(QWidget):
     def on_lbp_data(self, roi_id: int, processed: dict):
         if roi_id < len(self.lbp_plot_widgets):
             self.lbp_plot_widgets[roi_id].push(processed)
+            self.t2_plot_widgets[roi_id].push(processed)
+            self.q_plot_widgets[roi_id].push(processed)
 
     @Slot(int, object)
     def on_lk_data(self, roi_id: int, processed: dict):

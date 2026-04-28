@@ -62,6 +62,10 @@ class LBPPCAHandler:
             dist_y = ((coords[1] - self.mean_pc[1]) / (self.std_pc[1] + 1e-9)) ** 2
             t_squared = float(dist_x + dist_y)
             
+            # Calculate Q-statistic (SPE)
+            reconstructed = self.pca.inverse_transform(coords.reshape(1, -1))[0]
+            q_statistic = float(np.sum((combined_hist - reconstructed) ** 2))
+            
             # 95% confidence chi-square threshold for 2 degrees of freedom is approx 5.991
             is_anomaly = t_squared > 5.991
             
@@ -76,6 +80,7 @@ class LBPPCAHandler:
                 "var_pc1": float(self.pca.explained_variance_ratio_[0]),
                 "var_pc2": float(self.pca.explained_variance_ratio_[1]),
                 "t_squared": t_squared,
+                "q_statistic": q_statistic,
                 "is_anomaly": is_anomaly,
                 "elapsed": elapsed
             }
