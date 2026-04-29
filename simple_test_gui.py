@@ -38,6 +38,62 @@ _ALGO_LBP = 2
 
 
 # ---------------------------------------------------------------------------
+# Live Data Config Dialog
+# ---------------------------------------------------------------------------
+class LiveDataConfigDialog(QDialog):
+    def __init__(self, current_config, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Live Data Configuration")
+        
+        layout = QVBoxLayout(self)
+        
+        self.chk_all = QCheckBox("All live data")
+        self.chk_lbp = QCheckBox("LBP plot")
+        self.chk_t2 = QCheckBox("T² plot")
+        self.chk_q = QCheckBox("Q-statistic plot")
+        self.chk_vel = QCheckBox("Velocity plot")
+        
+        self.chk_all.setChecked(current_config.get("all", True))
+        self.chk_lbp.setChecked(current_config.get("lbp", True))
+        self.chk_t2.setChecked(current_config.get("t2", True))
+        self.chk_q.setChecked(current_config.get("q", True))
+        self.chk_vel.setChecked(current_config.get("vel", True))
+        
+        layout.addWidget(self.chk_all)
+        layout.addWidget(self.chk_lbp)
+        layout.addWidget(self.chk_t2)
+        layout.addWidget(self.chk_q)
+        layout.addWidget(self.chk_vel)
+        
+        self.chk_all.toggled.connect(self._on_all_toggled)
+        self._on_all_toggled(self.chk_all.isChecked())
+        
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+        
+    def _on_all_toggled(self, checked):
+        self.chk_lbp.setEnabled(not checked)
+        self.chk_t2.setEnabled(not checked)
+        self.chk_q.setEnabled(not checked)
+        self.chk_vel.setEnabled(not checked)
+        if checked:
+            self.chk_lbp.setChecked(True)
+            self.chk_t2.setChecked(True)
+            self.chk_q.setChecked(True)
+            self.chk_vel.setChecked(True)
+
+    def get_config(self):
+        return {
+            "all": self.chk_all.isChecked(),
+            "lbp": self.chk_lbp.isChecked(),
+            "t2": self.chk_t2.isChecked(),
+            "q": self.chk_q.isChecked(),
+            "vel": self.chk_vel.isChecked()
+        }
+
+# ---------------------------------------------------------------------------
 # Main Window
 # ---------------------------------------------------------------------------
 class FullStackTestWindow(QWidget):
@@ -61,6 +117,14 @@ class FullStackTestWindow(QWidget):
         self.roi_manager  = ROICoordinateManager(max_rois=3)
         self.last_frame   = None
         self._is_playing  = False
+        
+        self._live_config = {
+            "all": True,
+            "lbp": True,
+            "t2": True,
+            "q": True,
+            "vel": True
+        }
 
         # Last raw crop per ROI — updated every frame and forwarded to detail windows
         self._last_crops: list[np.ndarray | None] = [None] * self.roi_manager.max_rois
@@ -130,10 +194,9 @@ class FullStackTestWindow(QWidget):
             "<p style='color:gray;font-size:10px;'>Click a thumbnail to open the live detail view</p>"
         ))
 
-        self.chk_show_live = QCheckBox("Show live data")
-        self.chk_show_live.setChecked(True)
-        self.chk_show_live.setStyleSheet("font-size: 11px; color: #cccccc;")
-        right_panel.addWidget(self.chk_show_live)
+        self.btn_live_config = QPushButton("Live data Config")
+        self.btn_live_config.setStyleSheet("background-color: #2F4F4F; color: white;")
+        right_panel.addWidget(self.btn_live_config)
 
         self._selected_roi = 0
 
@@ -223,7 +286,7 @@ class FullStackTestWindow(QWidget):
         self.btn_undo_roi.clicked.connect(self.undo_roi)
         self.overlay_widget.roi_finalized.connect(self.on_roi_finalized)
 
-        self.chk_show_live.toggled.connect(self._toggle_live_data_panel)
+        self.btn_live_config.clicked.connect(self.open_live_data_config)
 
         self.data_hub.lbp_data_ready.connect(self.on_lbp_data)
         self.data_hub.lk_data_ready.connect(self.on_lk_data)
@@ -260,14 +323,27 @@ class FullStackTestWindow(QWidget):
         self.log_book_widget.raise_()
         self.log_book_widget.activateWindow()
 
-    @Slot(bool)
-    def _toggle_live_data_panel(self, visible: bool):
+    @Slot()
+    def open_live_data_config(self):
+        dlg = LiveDataConfigDialog(self._live_config, parent=self)
+        if dlg.exec():
+            self._live_config = dlg.get_config()
+            self._apply_live_config()
+
+    def _apply_live_config(self):
+        self.plot_stack.setVisible(self._live_config["lbp"])
+        self.t2_plot_stack.setVisible(self._live_config["t2"])
+        self.q_plot_stack.setVisible(self._live_config["q"])
+        self.vel_plot_stack.setVisible(self._live_config["vel"])
+        
+        any_visible = any([
+            self._live_config["lbp"], 
+            self._live_config["t2"], 
+            self._live_config["q"], 
+            self._live_config["vel"]
+        ])
         for crop in self.crop_widgets:
-            crop.setVisible(visible)
-        self.plot_stack.setVisible(visible)
-        self.t2_plot_stack.setVisible(visible)
-        self.q_plot_stack.setVisible(visible)
-        self.vel_plot_stack.setVisible(visible)
+            crop.setVisible(any_visible)
 
     def select_roi(self, idx: int):
         self._selected_roi = idx

@@ -104,7 +104,7 @@ class GlobalDataHub(QThread):
 
         # --- Assess Priority Level & Record out to File ---
         level = LogLevel.INFO
-        if processed.get("is_anomaly", False):
+        if processed.get("is_anomaly", False) or processed.get("pca_updated", False):
             level = LogLevel.IMPORTANT
         elif processed.get("velocity_ready", False):
             level = LogLevel.VELOCITY
@@ -249,7 +249,8 @@ class GlobalDataHub(QThread):
         else:
             pc1 = processed.get("pc1", 0.0)
             pc2 = processed.get("pc2", 0.0)
-            return f"{base_str} | PC1: {pc1:.4f}, PC2: {pc2:.4f}"
+            extra = " | [MODEL UPDATED]" if processed.get("pca_updated", False) else ""
+            return f"{base_str} | PC1: {pc1:.4f}, PC2: {pc2:.4f}{extra}"
 
     def reset_roi_lbp_state(self, roi_id: int):
         """Clear the LBP baseline state for an ROI so it starts over."""

@@ -3,6 +3,7 @@ pca_handler.py — Logic for managing LBP texture baseline collection and PCA pr
 """
 
 import time
+from collections import deque
 import numpy as np
 from sklearn.decomposition import PCA
 
@@ -15,10 +16,13 @@ class LBPPCAHandler:
         self.baseline_duration = baseline_duration
         self.status = "baseline"
         self.start_time = time.time()
-        self.data = []
+        self.data = deque(maxlen=1500)
         self.pca = None
         self.mean_pc = None
         self.std_pc = None
+        
+        self.last_update_time = None
+        self.update_interval = 3.0
 
     def process_frame(self, combined_hist: np.ndarray, roi_id: int) -> dict:
         """
@@ -42,6 +46,7 @@ class LBPPCAHandler:
                     self.std_pc = np.std(X_pca, axis=0)
                     
                     self.status = "monitoring"
+                    self.last_update_time = time.time()
                     print(f"\n--- [LBP PCA] ROI {roi_id + 1} Baseline Complete! Used {len(X)} frames over {elapsed:.2f} seconds. ---\n")
                 else:
                     # Not enough data, maybe keep trying or handle error
@@ -69,8 +74,25 @@ class LBPPCAHandler:
             # 95% confidence chi-square threshold for 2 degrees of freedom is approx 5.991
             is_anomaly = t_squared > 5.991
             
+            if not is_anomaly:
+                self.data.append(combined_hist)
+                
+            pca_updated = False
+            current_time = time.time()
+            if current_time - self.last_update_time >= self.update_interval:
+                X = np.array(self.data)
+                if len(X) >= 2:
+                    self.pca = PCA(n_components=2)
+                    self.pca.fit(X)
+                    X_pca = self.pca.transform(X)
+                    self.mean_pc = np.mean(X_pca, axis=0)
+                    self.std_pc = np.std(X_pca, axis=0)
+                    pca_updated = True
+                self.last_update_time = current_time
+            
             return {
                 "is_baseline": False,
+                "pca_updated": pca_updated,
                 "pc1": float(coords[0]),
                 "pc2": float(coords[1]),
                 "mean_pc1": float(self.mean_pc[0]),

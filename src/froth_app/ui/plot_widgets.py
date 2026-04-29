@@ -60,7 +60,7 @@ class LBPPlotWidget(pg.PlotWidget):
         self._pc1.append(pc1)
         self._pc2.append(pc2)
         
-        if "mean_pc1" in data and not self._confidence_ellipse.isVisible():
+        if "mean_pc1" in data:
             m1 = data["mean_pc1"]
             m2 = data["mean_pc2"]
             s1 = data["std_pc1"]
@@ -72,7 +72,8 @@ class LBPPlotWidget(pg.PlotWidget):
             b = s2 * np.sqrt(threshold)
             
             self._confidence_ellipse.setRect(QRectF(m1 - a, m2 - b, 2 * a, 2 * b))
-            self._confidence_ellipse.show()
+            if not self._confidence_ellipse.isVisible():
+                self._confidence_ellipse.show()
             
             # Plot the principal eigenvector axis directly along PC1
             self._fit_line.setData([m1 - a, m1 + a], [m2, m2])
@@ -250,7 +251,7 @@ class QStatisticPlotWidget(pg.PlotWidget):
         self._q.append(q_stat)
         self._curve.setData(self._x, list(self._q))
         
-        self.setTitle(f"ROI {self.roi_index + 1}  —  Q: {q_stat:.2f}", color="#bd93f9")
+        self.setTitle(f"ROI {self.roi_index + 1}  —  Q: {q_stat:.2e}", color="#bd93f9")
 
     def clear_data(self):
         zero = [0.0] * self.HISTORY

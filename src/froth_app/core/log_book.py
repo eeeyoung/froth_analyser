@@ -110,11 +110,21 @@ class LogBook(QObject):
         filtered_data = {}
     
         if algorithm == "LBPAlgorithm":
-            filtered_data = {
-                "pc1": data_payload.get("pc1"),
-                "pc2": data_payload.get("pc2"),
-                "t_squared": data_payload.get("t_squared")
-            }
+            if data_payload.get("pca_updated", False):
+                filtered_data = {
+                    "mean_pc1": f"{data_payload.get('mean_pc1', 0.0):.4e}",
+                    "mean_pc2": f"{data_payload.get('mean_pc2', 0.0):.4e}",
+                    "std_pc1": f"{data_payload.get('std_pc1', 0.0):.4e}",
+                    "std_pc2": f"{data_payload.get('std_pc2', 0.0):.4e}"
+                }
+            else:
+                filtered_data = {
+                    "pc1": data_payload.get("pc1"),
+                    "pc2": data_payload.get("pc2"),
+                    "t_squared": data_payload.get("t_squared")
+                }
+                if data_payload.get("is_anomaly", False):
+                    filtered_data["is_anomaly"] = True
         elif algorithm == "LucasKanadeAlgorithm":
             filtered_data = {
                 "velocity": data_payload.get("velocity"),
