@@ -8,21 +8,58 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QFileDialog, QMessageBox
 )
 
+# ---------------------------------------------------------------------------
+# Optional decord import — graceful fallback to cv2 if not installed
+# ---------------------------------------------------------------------------
+_HAS_DECORD = False
+_HAS_DECORD_GPU = False
+try:
+    from decord import VideoReader as DecordVideoReader
+    from decord import cpu as decord_cpu, gpu as decord_gpu
+    _HAS_DECORD = True
+
+    # Probe GPU availability at import time with a safe check.
+    # decord raises RuntimeError if CUDA is not available.
+    try:
+        # A lightweight probe — no actual video needed
+        _ = decord_gpu(0)
+        _HAS_DECORD_GPU = True
+    except Exception:
+        _HAS_DECORD_GPU = False
+
+    _backend_label = "decord (GPU)" if _HAS_DECORD_GPU else "decord (CPU)"
+    print(f"[VideoSource] Hardware decoding available: {_backend_label}")
+except ImportError:
+    print("[VideoSource] decord not installed — using OpenCV CPU decoding.")
+
+
 class VideoSource(QThread):
     """
     Producer thread that handles video frames acquisition from a camera or a video file.
     Runs asynchronously and emits frames to the UI consumer.
+
+    Video file decoding priority (cross-platform)
+    -----------------------------------------------
+    1. decord + GPU   — Windows with Nvidia GPU  (NVDEC hardware decoder)
+    2. decord + CPU   — macOS / Windows without GPU  (still faster than cv2)
+    3. cv2.VideoCapture — fallback if decord is not installed
+
+    Live camera sources always use cv2.VideoCapture (decord does not support webcams).
     """
     frame_ready = Signal(np.ndarray)
     error_occurred = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.capture = None
+        self.capture = None          # cv2.VideoCapture (cameras or fallback)
+        self._decord_vr = None       # decord.VideoReader (video files)
+        self._decord_pos = 0         # Current frame index for decord
+        self._decord_total = 0       # Total frame count from decord
         self._is_running = False
         self._is_paused = False
         self.fps = 30.0
         self.is_file = False
+        self._using_decord = False   # True when decord is the active backend
         self.mutex = QMutex()
 
     @staticmethod
@@ -46,69 +83,155 @@ class VideoSource(QThread):
         print(available_cameras)
         return available_cameras
 
+    # ------------------------------------------------------------------
+    # Source loading
+    # ------------------------------------------------------------------
+
+    def _release_current(self):
+        """Release whichever backend is currently active."""
+        if self.capture is not None:
+            self.capture.release()
+            self.capture = None
+        self._decord_vr = None
+        self._decord_pos = 0
+        self._decord_total = 0
+        self._using_decord = False
+
     def load_source(self, source):
         """
         Loads a camera index (int) or a video file path (str).
+
+        For video files, attempts to use decord for hardware-accelerated
+        decoding before falling back to cv2.VideoCapture.
         """
         with QMutexLocker(self.mutex):
-            if self.capture is not None:
-                self.capture.release()
+            self._release_current()
             
             # Integers are usually local cameras; strings are files/streams
             if isinstance(source, int):
-                # DSHOW prevents long timeouts if a camera is stuck
+                # Live camera — always use cv2
                 if sys.platform == "win32":
                     self.capture = cv2.VideoCapture(source, cv2.CAP_DSHOW)
                 else:
                     self.capture = cv2.VideoCapture(source)
                 self.is_file = False
+
+                if not self.capture.isOpened():
+                    self.error_occurred.emit(f"Failed to open camera: {source}")
+                    return False
+
+                # Camera FPS
+                extracted_fps = self.capture.get(cv2.CAP_PROP_FPS)
+                if extracted_fps > 0 and not np.isnan(extracted_fps):
+                    self.fps = extracted_fps
+                else:
+                    self.fps = 30.0
+
             else:
-                self.capture = cv2.VideoCapture(source)
+                # Video file — try decord first, then fall back to cv2
                 self.is_file = True
 
-            if not self.capture.isOpened():
-                self.error_occurred.emit(f"Failed to open source: {source}")
-                return False
+                if _HAS_DECORD:
+                    try:
+                        ctx = decord_gpu(0) if _HAS_DECORD_GPU else decord_cpu(0)
+                        self._decord_vr = DecordVideoReader(source, ctx=ctx)
+                        self._decord_total = len(self._decord_vr)
+                        self._decord_pos = 0
+                        self._using_decord = True
 
-            # Extract valid FPS for pacing file playback
-            extracted_fps = self.capture.get(cv2.CAP_PROP_FPS)
-            if extracted_fps > 0 and not np.isnan(extracted_fps):
-                self.fps = extracted_fps
-            else:
-                self.fps = 30.0
-                
+                        # Extract FPS from decord
+                        avg_fps = self._decord_vr.get_avg_fps()
+                        self.fps = avg_fps if avg_fps > 0 else 30.0
+
+                        backend = "GPU (NVDEC)" if _HAS_DECORD_GPU else "CPU"
+                        print(
+                            f"[VideoSource] Opened '{source}' with decord {backend} | "
+                            f"{self._decord_total} frames @ {self.fps:.1f} FPS"
+                        )
+                        return True
+                    except Exception as e:
+                        print(
+                            f"[VideoSource] decord failed for '{source}': {e} — "
+                            f"falling back to OpenCV."
+                        )
+                        self._decord_vr = None
+                        self._using_decord = False
+
+                # Fallback: cv2.VideoCapture
+                self.capture = cv2.VideoCapture(source)
+                if not self.capture.isOpened():
+                    self.error_occurred.emit(f"Failed to open source: {source}")
+                    return False
+
+                extracted_fps = self.capture.get(cv2.CAP_PROP_FPS)
+                if extracted_fps > 0 and not np.isnan(extracted_fps):
+                    self.fps = extracted_fps
+                else:
+                    self.fps = 30.0
+
+                print(f"[VideoSource] Opened '{source}' with OpenCV CPU @ {self.fps:.1f} FPS")
+
         return True
+
+    # ------------------------------------------------------------------
+    # Main run loop
+    # ------------------------------------------------------------------
 
     def run(self):
         """The main thread loop that reads and emits frames."""
         self._is_running = True
         
         while self._is_running:
-            delay = 1 # Milliseconds to sleep per loop iteration (minimum)
+            delay = 1  # Milliseconds to sleep per loop iteration (minimum)
 
             with QMutexLocker(self.mutex):
-                if not self._is_paused and self.capture and self.capture.isOpened():
-                    ret, frame = self.capture.read()
-                    
-                    if ret:
-                        self.frame_ready.emit(frame)
-                        
-                        # Simulate real-time if playing a file to prevent ultra-fast playback
-                        if self.is_file:
+                if not self._is_paused:
+                    if self._using_decord and self._decord_vr is not None:
+                        frame = self._read_decord()
+                        if frame is not None:
+                            self.frame_ready.emit(frame)
                             delay = int(1000 / self.fps)
-                    else:
-                        # Reached the end of the video or capture failed
-                        if self.is_file:
-                            # Loop back to beginning for convenience
-                            self.capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    elif self.capture and self.capture.isOpened():
+                        ret, frame = self.capture.read()
+                        if ret:
+                            self.frame_ready.emit(frame)
+                            if self.is_file:
+                                delay = int(1000 / self.fps)
                         else:
-                            self._is_paused = True 
+                            if self.is_file:
+                                self.capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                            else:
+                                self._is_paused = True
 
             # Sleep is called outside the mutex lock so the UI can still interact (pause, play)
             if self._is_paused:
                 self.msleep(50)  # Sleep longer when paused to save CPU
             else:
                 self.msleep(delay)
+
+    def _read_decord(self) -> np.ndarray | None:
+        """
+        Read the next frame from the decord VideoReader.
+
+        Returns a BGR numpy array (matching cv2 convention) or None at EOF.
+        Automatically loops back to the start when the video ends.
+        """
+        if self._decord_pos >= self._decord_total:
+            # Loop back to start
+            self._decord_pos = 0
+
+        try:
+            # decord returns RGB; convert to BGR to match the rest of the pipeline
+            rgb_frame = self._decord_vr[self._decord_pos].asnumpy()
+            self._decord_pos += 1
+            return cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
+        except Exception:
+            self._decord_pos = 0
+            return None
+
+    # ------------------------------------------------------------------
+    # Playback controls
+    # ------------------------------------------------------------------
 
     def play(self):
         with QMutexLocker(self.mutex):
@@ -128,9 +251,8 @@ class VideoSource(QThread):
     def release(self):
         """Ensure thread stops safely and resources are released."""
         self.stop()
-        self.wait() # Block until the thread loop exits naturally
-        if self.capture is not None:
-            self.capture.release()
+        self.wait()  # Block until the thread loop exits naturally
+        self._release_current()
 
 
 class VideoPlayerWidget(QLabel):

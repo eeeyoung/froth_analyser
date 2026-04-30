@@ -513,6 +513,11 @@ class FullStackTestWindow(QWidget):
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32":
+        import ctypes
+        # Force 1ms timer resolution on Windows to prevent msleep() stutter
+        ctypes.WinDLL('winmm').timeBeginPeriod(1)
+
     freeze_support()
     app = QApplication(sys.argv)
     window = FullStackTestWindow()
