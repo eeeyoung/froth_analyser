@@ -22,6 +22,7 @@ from src.froth_app.ui.roi_detail_window import ROIDetailWindow
 from src.froth_app.ui.log_book_interface import LogBookInterface
 from src.froth_app.ui.functions_dialog import FunctionsDialog
 from src.froth_app.ui.plot_widgets import LBPPlotWidget, VelocityPlotWidget, TSquarePlotWidget, QStatisticPlotWidget
+from src.froth_app.ui.macro_feature_widget import MacroFeatureWidget
 from src.froth_app.ui.overflow_calibration_widget import OverflowCalibrationWidget
 from src.froth_app.ui.calibration_button import CalibrationButton
 from src.froth_app.core.calibration import CalibrationManager
@@ -113,6 +114,8 @@ class FullStackTestWindow(QWidget):
         self.log_book_widget = LogBookInterface()
         self.data_hub.log_book.log_ready.connect(self.log_book_widget.push_log)
 
+        self.macro_feature_widget = MacroFeatureWidget()
+
         self.video_source = VideoSource()
         self.roi_manager  = ROICoordinateManager(max_rois=3)
         self.last_frame   = None
@@ -165,12 +168,16 @@ class FullStackTestWindow(QWidget):
         self.btn_logbook = QPushButton("5. Log Book")
         self.btn_logbook.setStyleSheet("background-color: #2F4F4F; color: white;")
 
+        self.btn_macro_features = QPushButton("6. Macro Features")
+        self.btn_macro_features.setStyleSheet("background-color: #5c3a5c; color: white;")
+
         btn_layout.addWidget(self.btn_load_cam)
         btn_layout.addWidget(self.btn_load_video)
         btn_layout.addWidget(self.btn_play_pause)
         btn_layout.addWidget(self.btn_calibration)
         btn_layout.addWidget(self.btn_functions)
         btn_layout.addWidget(self.btn_logbook)
+        btn_layout.addWidget(self.btn_macro_features)
         left_panel.addLayout(btn_layout)
 
         # --- ROI Architecture Buttons ---
@@ -277,6 +284,7 @@ class FullStackTestWindow(QWidget):
         self.btn_play_pause.clicked.connect(self.toggle_play_pause)
         self.btn_functions.clicked.connect(self.open_functions_dialog)
         self.btn_logbook.clicked.connect(self.open_log_book)
+        self.btn_macro_features.clicked.connect(self.open_macro_feature_widget)
 
         # Calibration button signals
         self.btn_calibration.overflow_requested.connect(self._start_overflow_calibration)
@@ -322,6 +330,13 @@ class FullStackTestWindow(QWidget):
         self.log_book_widget.show()
         self.log_book_widget.raise_()
         self.log_book_widget.activateWindow()
+
+    @Slot()
+    def open_macro_feature_widget(self):
+        """Open the macroscopic image feature bar-chart window."""
+        self.macro_feature_widget.show()
+        self.macro_feature_widget.raise_()
+        self.macro_feature_widget.activateWindow()
 
     @Slot()
     def open_live_data_config(self):
@@ -441,6 +456,13 @@ class FullStackTestWindow(QWidget):
 
         self.analyzer.process_frame(frame, self.roi_manager.rois)
 
+        # Macroscopic features from the full frame (BGR order)
+        brightness = float(np.mean(frame))
+        r_level = float(frame[:, :, 2].mean())
+        g_level = float(frame[:, :, 1].mean())
+        b_level = float(frame[:, :, 0].mean())
+        self.macro_feature_widget.push_features(brightness, r_level, g_level, b_level)
+
     @Slot(int, object)
     def on_lbp_data(self, roi_id: int, processed: dict):
         if roi_id < len(self.lbp_plot_widgets):
@@ -505,6 +527,8 @@ class FullStackTestWindow(QWidget):
             if detail is not None:
                 detail.setAttribute(Qt.WA_DeleteOnClose, True)
                 detail.close()
+        self.macro_feature_widget.setAttribute(Qt.WA_DeleteOnClose, True)
+        self.macro_feature_widget.close()
         self.analyzer.shutdown_all()
         self.data_hub.log_book.flush_and_close()
         self.data_hub.shutdown()
