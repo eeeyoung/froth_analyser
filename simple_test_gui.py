@@ -160,16 +160,16 @@ class FullStackTestWindow(QWidget):
         self.btn_load_cam   = QPushButton("1. Camera")
         self.btn_load_video = QPushButton("2. Video")
         self.btn_play_pause = QPushButton("3. Play")
+        self.btn_play_pause.setObjectName("success")
         self.btn_calibration = CalibrationButton()
 
         self.btn_functions = QPushButton("4. Functions")
-        self.btn_functions.setStyleSheet("background-color: #555555; color: white;")
+        self.btn_functions.setObjectName("accent")
         
         self.btn_logbook = QPushButton("5. Log Book")
-        self.btn_logbook.setStyleSheet("background-color: #2F4F4F; color: white;")
 
         self.btn_macro_features = QPushButton("6. Macro Features")
-        self.btn_macro_features.setStyleSheet("background-color: #5c3a5c; color: white;")
+        self.btn_macro_features.setObjectName("accent")
 
         btn_layout.addWidget(self.btn_load_cam)
         btn_layout.addWidget(self.btn_load_video)
@@ -183,9 +183,9 @@ class FullStackTestWindow(QWidget):
         # --- ROI Architecture Buttons ---
         roi_btn_layout = QHBoxLayout()
         self.btn_add_roi  = QPushButton("+ Add Custom ROI & Start Analysis Thread")
-        self.btn_add_roi.setStyleSheet("background-color: #2F4F4F; color: white;")
+        self.btn_add_roi.setObjectName("primary")
         self.btn_undo_roi = QPushButton("- Undo ROI & Kill Thread")
-        self.btn_undo_roi.setStyleSheet("background-color: #8B0000; color: white;")
+        self.btn_undo_roi.setObjectName("danger")
         roi_btn_layout.addWidget(self.btn_add_roi)
         roi_btn_layout.addWidget(self.btn_undo_roi)
         left_panel.addLayout(roi_btn_layout)
@@ -202,7 +202,6 @@ class FullStackTestWindow(QWidget):
         ))
 
         self.btn_live_config = QPushButton("Live data Config")
-        self.btn_live_config.setStyleSheet("background-color: #2F4F4F; color: white;")
         right_panel.addWidget(self.btn_live_config)
 
         self._selected_roi = 0
@@ -544,6 +543,13 @@ if __name__ == "__main__":
 
     freeze_support()
     app = QApplication(sys.argv)
+
+    # Load global dark-industrial stylesheet
+    import os as _os
+    _qss_path = _os.path.join(_os.path.dirname(__file__), "src", "froth_app", "ui", "style.qss")
+    with open(_qss_path, "r") as _f:
+        app.setStyleSheet(_f.read())
+
     window = FullStackTestWindow()
     window.show()
     sys.exit(app.exec())

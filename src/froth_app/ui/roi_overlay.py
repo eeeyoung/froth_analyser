@@ -194,8 +194,8 @@ class CroppedROIWidget(QLabel):
         self._update_style()
 
     def _update_style(self):
-        border = "3px solid #00ff00" if self._is_selected else "1px solid #555"
-        self.setStyleSheet(f"background-color: #1a1a1a; border: {border}; color: white;")
+        border = "2px solid #3fb950" if self._is_selected else "1px solid #30363d"
+        self.setStyleSheet(f"border: {border};")
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:

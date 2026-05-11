@@ -17,7 +17,6 @@ class LogBookInterface(QWidget):
         super().__init__(parent)
         self.setWindowTitle("Real-Time Analytical Log Book")
         self.resize(800, 500)
-        self.setStyleSheet("background-color: #121212; color: #dddddd;")
         
         self.current_mode = "all"  # 'all' or 'important'
         
@@ -37,16 +36,16 @@ class LogBookInterface(QWidget):
         self.btn_important.setCheckable(True)
         self.btn_all.setChecked(True)
         
-        # Consistent styling mimicking segmented controls
+        # Segmented toggle-button group
         base_style = """
-            QPushButton { padding: 6px 16px; border: 1px solid #444; font-weight: bold; background-color: #2b2b2b; }
+            QPushButton { padding: 6px 16px; border: 1px solid #30363d; font-weight: bold; background-color: #21262d; }
             QPushButton:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; border-right: none; }
             QPushButton:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; border-left: none; }
             QPushButton:not(:first-child):not(:last-child) { border-right: none; }
         """
-        self.btn_all.setStyleSheet(base_style + "QPushButton:checked { background-color: #555555; color: white; }")
-        self.btn_velocity.setStyleSheet(base_style + "QPushButton:checked { background-color: #005577; color: white; }")
-        self.btn_important.setStyleSheet(base_style + "QPushButton:checked { background-color: #8B0000; color: white; }")
+        self.btn_all.setStyleSheet(base_style + "QPushButton:checked { background-color: #30363d; color: #c9d1d9; }")
+        self.btn_velocity.setStyleSheet(base_style + "QPushButton:checked { background-color: #1f6feb; color: white; }")
+        self.btn_important.setStyleSheet(base_style + "QPushButton:checked { background-color: #da3633; color: white; }")
         
         btn_layout.addWidget(self.btn_all)
         btn_layout.addWidget(self.btn_velocity)
@@ -66,11 +65,6 @@ class LogBookInterface(QWidget):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.verticalHeader().hide()
-        
-        self.table.setStyleSheet(
-            "QTableWidget { background-color: #1e1e1e; gridline-color: #333; }"
-            "QHeaderView::section { background-color: #2b2b2b; padding: 4px; border: 1px solid #333; font-weight: bold; }"
-        )
         layout.addWidget(self.table)
         
         # Memory tracking prevents out-of-memory array leaks
@@ -158,9 +152,9 @@ class LogBookInterface(QWidget):
         alert_color = None
         
         if level >= 5:
-            alert_color = QColor(100, 30, 30)  # Red for anomalies
+            alert_color = QColor(73, 29, 29)   # Dark red for anomalies
         elif level == 2:
-            alert_color = QColor(20, 60, 80)   # Blue for velocity drops
+            alert_color = QColor(17, 38, 65)   # Dark blue for velocity drops
             
         if alert_color:
             t_time.setBackground(alert_color)

@@ -24,14 +24,13 @@ class FunctionsDialog(QDialog):
 
         self.setWindowTitle("Analysis Functions")
         self.setFixedSize(320, 220)
-        self.setStyleSheet("background-color: #1e1e1e; color: #e0e0e0;")
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
         layout.setContentsMargins(18, 18, 18, 18)
 
         title = QLabel("Select functions to run on each ROI:")
-        title.setStyleSheet("font-size: 11px; color: #aaaaaa;")
+        title.setStyleSheet("font-size: 11px; color: #8b949e;")
         layout.addWidget(title)
 
         # Build spinbox for LBP Baseline config
@@ -40,15 +39,12 @@ class FunctionsDialog(QDialog):
         self._lbp_duration_spinbox.setSingleStep(0.5)
         self._lbp_duration_spinbox.setValue(self._data_hub.baseline_duration)
         self._lbp_duration_spinbox.setSuffix(" s")
-        self._lbp_duration_spinbox.setStyleSheet(
-            "QDoubleSpinBox { font-size: 12px; background-color: #2c2c2c; "
-            "color: white; border: 1px solid #444; border-radius: 3px; padding: 2px; }"
-        )
+        self._lbp_duration_spinbox.setStyleSheet("font-size: 12px;")
         self._lbp_duration_container = QWidget()
         dur_layout = QHBoxLayout(self._lbp_duration_container)
         dur_layout.setContentsMargins(24, 0, 0, 0)
         lbl = QLabel("↳ Baseline duration:")
-        lbl.setStyleSheet("font-size: 11px; color: #888888;")
+        lbl.setStyleSheet("font-size: 11px; color: #8b949e;")
         dur_layout.addWidget(lbl)
         dur_layout.addWidget(self._lbp_duration_spinbox)
         dur_layout.addStretch()
@@ -58,7 +54,6 @@ class FunctionsDialog(QDialog):
         for algo_id, label in AlgorithmStateManager.ALGORITHM_LABELS.items():
             chk = QCheckBox(label)
             chk.setChecked(algo_state.is_active(algo_id))
-            chk.setStyleSheet("font-size: 12px;")
             layout.addWidget(chk)
             self._checkboxes[algo_id] = chk
             
@@ -69,11 +64,6 @@ class FunctionsDialog(QDialog):
 
         # Confirm button
         btn_box = QDialogButtonBox(QDialogButtonBox.Ok)
-        btn_box.setStyleSheet(
-            "QPushButton { background-color: #3a3a3a; color: white; "
-            "border-radius: 4px; padding: 4px 14px; }"
-            "QPushButton:hover { background-color: #555555; }"
-        )
         btn_box.accepted.connect(self._on_confirm)
         layout.addWidget(btn_box)
 

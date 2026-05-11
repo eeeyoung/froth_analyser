@@ -66,7 +66,6 @@ class ROIDetailWindow(QWidget):
 
         self._label = QLabel()
         self._label.setAlignment(Qt.AlignCenter)
-        self._label.setStyleSheet("background-color: #0d0d0d;")
 
         # Crosshair overlay — passes the label so it can compute the image rect
         self._crosshair = MotionCrosshairOverlay(crop_widget=self._label)

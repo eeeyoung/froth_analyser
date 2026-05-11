@@ -262,7 +262,7 @@ class VideoPlayerWidget(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("background-color: black; border: 2px solid gray;")
+        self.setStyleSheet("background-color: black; border: 2px solid #30363d;")
         self.setText("No Video Source Loaded")
         # Ensure it has a reasonable default size for the test
         self.setMinimumSize(640, 480)

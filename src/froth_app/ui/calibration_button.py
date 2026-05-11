@@ -28,19 +28,25 @@ class CalibrationButton(QWidget):
     ruler_requested    = Signal()
 
     _IDLE_STYLE = (
-        "QPushButton { background-color: #3a3a5c; color: #c8d0e8; "
-        "border: 1px solid #555580; padding: 4px 8px; }"
-        "QPushButton:hover { background-color: #484870; }"
+        "QPushButton { background-color: #21262d; color: #c9d1d9; "
+        "border: 1px solid #30363d; border-radius: 6px; "
+        "border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
+        "padding: 5px 10px; }"
+        "QPushButton:hover { background-color: #30363d; border-color: #58a6ff; }"
     )
     _ACTIVE_STYLE = (
-        "QPushButton { background-color: #8B0000; color: white; "
-        "border: 1px solid #cc2222; padding: 4px 8px; font-weight: bold; }"
-        "QPushButton:hover { background-color: #a02020; }"
+        "QPushButton { background-color: #da3633; color: #ffffff; "
+        "border: 1px solid #da3633; border-radius: 6px; "
+        "border-top-right-radius: 0px; border-bottom-right-radius: 0px; "
+        "padding: 5px 10px; font-weight: bold; }"
+        "QPushButton:hover { background-color: #e5534b; border-color: #e5534b; }"
     )
     _ARROW_STYLE = (
-        "QPushButton { background-color: #2e2e4a; color: #c8d0e8; "
-        "border: 1px solid #555580; border-left: none; padding: 4px 3px; }"
-        "QPushButton:hover { background-color: #484870; }"
+        "QPushButton { background-color: #161b22; color: #c9d1d9; "
+        "border: 1px solid #30363d; border-left: none; border-radius: 6px; "
+        "border-top-left-radius: 0px; border-bottom-left-radius: 0px; "
+        "padding: 5px 4px; }"
+        "QPushButton:hover { background-color: #30363d; border-color: #58a6ff; }"
     )
 
     def __init__(self, parent=None):
@@ -90,10 +96,10 @@ class CalibrationButton(QWidget):
     def _show_menu(self):
         menu = QMenu(self)
         menu.setStyleSheet(
-            "QMenu { background-color: #1e1e2e; color: #c8d0e8; "
-            "border: 1px solid #555580; }"
-            "QMenu::item:selected { background-color: #3a3a5c; }"
-            "QMenu::item:disabled { color: #555566; }"
+            "QMenu { background-color: #161b22; color: #c9d1d9; "
+            "border: 1px solid #30363d; }"
+            "QMenu::item:selected { background-color: #1f6feb; }"
+            "QMenu::item:disabled { color: #484f58; }"
         )
 
         act_overflow = QAction("⛶  Overflow Direction", self)

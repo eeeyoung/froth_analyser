@@ -16,7 +16,7 @@ class MainWindow(QMainWindow):
         # Placeholder for video display
         self.video_label = QLabel("Video Feed Placeholder")
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setStyleSheet("background-color: black; color: white; border: 2px solid #555;")
+        self.video_label.setStyleSheet("background-color: black; color: #c9d1d9; border: 2px solid #30363d;")
         self.layout.addWidget(self.video_label)
 
         # Basic status bar
